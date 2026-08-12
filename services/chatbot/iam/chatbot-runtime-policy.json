@@ -1,0 +1,40 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "SsmReadHpcPilot",
+      "Effect": "Allow",
+      "Action": [
+        "ssm:GetParameter",
+        "ssm:GetParameters",
+        "ssm:GetParametersByPath"
+      ],
+      "Resource": "<AWS_ARN><AWS_REGION>:<AWS_ACCOUNT_ID>:parameter/xyz-pilot/*"
+    },
+    {
+      "Sid": "KmsDecryptViaSsm",
+      "Effect": "Allow",
+      "Action": "kms:Decrypt",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "kms:ViaService": "ssm.<AWS_REGION>.amazonaws.com"
+        }
+      }
+    },
+    {
+      "Sid": "BedrockInvoke",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:InvokeModel",
+        "bedrock:InvokeModelWithResponseStream",
+        "bedrock:Converse",
+        "bedrock:ConverseStream"
+      ],
+      "Resource": [
+        "<AWS_ARN>*:<AWS_ACCOUNT_ID>:inference-profile/us.anthropic.*",
+        "<AWS_ARN>*::foundation-model/anthropic.*"
+      ]
+    }
+  ]
+}

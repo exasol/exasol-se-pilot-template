@@ -1,0 +1,67 @@
+name: <PILOT_NAME> Docs Discipline (Advisory)
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      base:
+        description: Base git ref for documentation discipline diff
+        required: false
+        default: HEAD~1
+      head:
+        description: Head git ref for documentation discipline diff
+        required: false
+        default: HEAD
+
+permissions:
+  contents: read
+
+concurrency:
+  group: xyz-pilot-docs-discipline-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  docs-discipline:
+    name: Documentation discipline check
+    runs-on: ubuntu-latest
+    # XYZ-PILOT-198: advisory workflow — job-level continue-on-error so failures
+    # surface as warnings in the run page + step summary but do NOT fire a
+    # GitHub failure-notification email. Advisory checks are signal, not gate.
+    continue-on-error: true
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Select documentation discipline diff range
+        id: range
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            base="${{ inputs.base }}"
+            head="${{ inputs.head }}"
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+          else
+            base="${{ github.event.before }}"
+            head="${{ github.sha }}"
+          fi
+          echo "base=${base}" >> "${GITHUB_OUTPUT}"
+          echo "head=${head}" >> "${GITHUB_OUTPUT}"
+
+      - name: Compile documentation discipline checker
+        run: python3 -m py_compile scripts/check_docs_discipline.py
+
+      - name: Run documentation discipline check
+        run: |
+          set -euo pipefail
+          python3 scripts/check_docs_discipline.py \
+            --base "${{ steps.range.outputs.base }}" \
+            --head "${{ steps.range.outputs.head }}" \
+            --github-summary

@@ -1,0 +1,27 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "SendHeadsUpOnlyToApprovedRecipients",
+            "Effect": "Allow",
+            "Action": "ses:SendEmail",
+            "Resource": [
+                "arn:aws:ses:eu-central-1:<AWS_ACCOUNT_ID>:identity/<OPERATOR_EMAIL>",
+                "arn:aws:ses:eu-central-1:<AWS_ACCOUNT_ID>:identity/<OPS_USER_3_EMAIL>",
+                "arn:aws:ses:eu-central-1:<AWS_ACCOUNT_ID>:identity/<OPS_USER_2_EMAIL>"
+            ],
+            "Condition": {
+                "StringEquals": {
+                    "ses:FromAddress": "<OPERATOR_EMAIL>"
+                },
+                "ForAllValues:StringEquals": {
+                    "ses:Recipients": [
+                        "<OPERATOR_EMAIL>",
+                        "<OPS_USER_3_EMAIL>",
+                        "<OPS_USER_2_EMAIL>"
+                    ]
+                }
+            }
+        }
+    ]
+}

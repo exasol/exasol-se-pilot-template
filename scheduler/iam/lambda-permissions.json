@@ -1,0 +1,16 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {"Sid":"EC2StartStopOnPilotInstanceOnly","Effect":"Allow","Action":["ec2:StartInstances","ec2:StopInstances"],"Resource":"<AWS_ARN><AWS_REGION>:<SOURCE_AWS_ACCOUNT_ID>:instance/<EC2_INSTANCE_ID>"},
+    {"Sid":"EC2DescribeReadOnly","Effect":"Allow","Action":["ec2:DescribeInstances","ec2:DescribeInstanceStatus"],"Resource":"*"},
+    {"Sid":"SSMSendCommandOnPilotInstanceOnly","Effect":"Allow","Action":["ssm:SendCommand"],"Resource":["<AWS_ARN><AWS_REGION>:<SOURCE_AWS_ACCOUNT_ID>:instance/<EC2_INSTANCE_ID>","<AWS_ARN><AWS_REGION>::document/AWS-RunShellScript"]},
+    {"Sid":"SSMReadCommandStatus","Effect":"Allow","Action":["ssm:GetCommandInvocation","ssm:DescribeInstanceInformation"],"Resource":"*"},
+    {"Effect":"Allow","Action":["ses:SendEmail","ses:SendRawEmail","ses:GetIdentityVerificationAttributes"],"Resource":"*"},
+    {"Effect":"Allow","Action":["s3:ListBucket"],"Resource":"<AWS_ARN><SOURCE_AWS_ACCOUNT_ID>","Condition":{"StringLike":{"s3:prefix":["candidate-drain/*"]}}},
+    {"Effect":"Allow","Action":["s3:GetObject","s3:PutObject","s3:PutObjectAcl"],"Resource":"<AWS_ARN><SOURCE_AWS_ACCOUNT_ID>/*"},
+    {"Sid":"ReadGithubTokenSecret","Effect":"Allow","Action":["secretsmanager:GetSecretValue"],"Resource":["<AWS_ARN><AWS_REGION>:<SOURCE_AWS_ACCOUNT_ID>:secret:xyz-pilot/github/service-token-*","<AWS_ARN><AWS_REGION>:<AWS_ACCOUNT_ID>:secret:xyz-pilot/github/service-token-*"]},
+    {"Sid":"ReadGithubTokenParameter","Effect":"Allow","Action":["ssm:GetParameter"],"Resource":["<AWS_ARN><AWS_REGION>:<SOURCE_AWS_ACCOUNT_ID>:parameter/xyz-pilot/chatbot/github-token","<AWS_ARN><AWS_REGION>:<AWS_ACCOUNT_ID>:parameter/xyz-pilot/chatbot/github-token"]},
+    {"Sid":"DecryptGithubTokenParameter","Effect":"Allow","Action":"kms:Decrypt","Resource":["<AWS_ARN><AWS_REGION>:<SOURCE_AWS_ACCOUNT_ID>:alias/aws/ssm","<AWS_ARN><AWS_REGION>:<AWS_ACCOUNT_ID>:alias/aws/ssm"]},
+    {"Effect":"Allow","Action":["logs:CreateLogGroup","logs:CreateLogStream","logs:PutLogEvents"],"Resource":"*"}
+  ]
+}

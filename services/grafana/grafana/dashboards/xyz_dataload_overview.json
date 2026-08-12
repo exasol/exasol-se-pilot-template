@@ -1,0 +1,380 @@
+{
+  "title": "<CUSTOMER_NAME> \u2014 <PILOT_SCHEMA> Data Load Overview",
+  "uid": "xyz-dataload-overview",
+  "tags": [
+    "xyz",
+    "exasol",
+    "dataload"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5m",
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Tables Loaded",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "exasol_xyz"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "http://exasol_proxy:8000/query",
+          "url_options": {
+            "method": "GET",
+            "params": [
+              {
+                "key": "sql",
+                "value": "SELECT COUNT(*) AS METRIC_VALUE FROM EXA_ALL_TABLES WHERE TABLE_SCHEMA = '<PILOT_SCHEMA>'"
+              }
+            ]
+          },
+          "root_selector": "",
+          "columns": []
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "FACT_PRIMARY Rows",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "exasol_xyz"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "http://exasol_proxy:8000/query",
+          "url_options": {
+            "method": "GET",
+            "params": [
+              {
+                "key": "sql",
+                "value": "SELECT COUNT(*) AS METRIC_VALUE FROM <PILOT_SCHEMA>.FACT_PRIMARY"
+              }
+            ]
+          },
+          "root_selector": "",
+          "columns": []
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Total Fact Rows",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 0
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "exasol_xyz"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "http://exasol_proxy:8000/query",
+          "url_options": {
+            "method": "GET",
+            "params": [
+              {
+                "key": "sql",
+                "value": "SELECT (SELECT COUNT(*) FROM <PILOT_SCHEMA>.FACT_PRIMARY) + (SELECT COUNT(*) FROM <PILOT_SCHEMA>.FACT_TARGET) + (SELECT COUNT(*) FROM <PILOT_SCHEMA>.FACT_STOCK) AS METRIC_VALUE"
+              }
+            ]
+          },
+          "root_selector": "",
+          "columns": []
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Date Coverage (days)",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 0
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "exasol_xyz"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "http://exasol_proxy:8000/query",
+          "url_options": {
+            "method": "GET",
+            "params": [
+              {
+                "key": "sql",
+                "value": "SELECT (MAX(INVOICE_DATE) - MIN(INVOICE_DATE)) AS METRIC_VALUE FROM <PILOT_SCHEMA>.FACT_PRIMARY"
+              }
+            ]
+          },
+          "root_selector": "",
+          "columns": []
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "d"
+        }
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "id": 5,
+      "type": "table",
+      "title": "Per-table Row Counts",
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 0,
+        "y": 4
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "exasol_xyz"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "http://exasol_proxy:8000/query",
+          "url_options": {
+            "method": "GET",
+            "params": [
+              {
+                "key": "sql",
+                "value": "SELECT 'FACT_PRIMARY' AS TABLE_NAME, COUNT(*) AS ROW_COUNT FROM <PILOT_SCHEMA>.FACT_PRIMARY UNION ALL SELECT 'FACT_TARGET', COUNT(*) FROM <PILOT_SCHEMA>.FACT_TARGET UNION ALL SELECT 'FACT_STOCK', COUNT(*) FROM <PILOT_SCHEMA>.FACT_STOCK UNION ALL SELECT 'DIM_ITEM', COUNT(*) FROM <PILOT_SCHEMA>.DIM_ITEM UNION ALL SELECT 'DIM_CATEGORY', COUNT(*) FROM <PILOT_SCHEMA>.DIM_CATEGORY UNION ALL SELECT 'DIM_ACCOUNT', COUNT(*) FROM <PILOT_SCHEMA>.DIM_ACCOUNT UNION ALL SELECT 'DIM_REGION', COUNT(*) FROM <PILOT_SCHEMA>.DIM_REGION UNION ALL SELECT 'DIM_DOCUMENT', COUNT(*) FROM <PILOT_SCHEMA>.DIM_DOCUMENT UNION ALL SELECT 'FACT_LEDGER', COUNT(*) FROM <PILOT_SCHEMA>.FACT_LEDGER UNION ALL SELECT 'DIM_CURRENCY', COUNT(*) FROM <PILOT_SCHEMA>.DIM_CURRENCY UNION ALL SELECT 'BETA_SEGMENT_ONE', COUNT(*) FROM <PILOT_SCHEMA>.BETA_SEGMENT_ONE UNION ALL SELECT 'BETA_SEGMENT_TWO', COUNT(*) FROM <PILOT_SCHEMA>.BETA_SEGMENT_TWO UNION ALL SELECT 'FACT_DELIVERY', COUNT(*) FROM <PILOT_SCHEMA>.FACT_DELIVERY ORDER BY ROW_COUNT DESC"
+              }
+            ]
+          },
+          "root_selector": "",
+          "columns": []
+        }
+      ],
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "id": 6,
+      "type": "barchart",
+      "title": "Top 3 Brands by Total Sales",
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 12,
+        "y": 4
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "exasol_xyz"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "http://exasol_proxy:8000/query",
+          "url_options": {
+            "method": "GET",
+            "params": [
+              {
+                "key": "sql",
+                "value": "SELECT pg.SEGMENT AS SEGMENT, ROUND(SUM(i.UNIT_VALUE), 0) AS TOTAL_VALUE FROM <PILOT_SCHEMA>.FACT_PRIMARY i JOIN <PILOT_SCHEMA>.DIM_CATEGORY pg ON i.CATEGORY_KEY = pg.CATEGORY_KEY GROUP BY pg.SEGMENT ORDER BY TOTAL_VALUE DESC LIMIT 3"
+              }
+            ]
+          },
+          "root_selector": "",
+          "columns": []
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD"
+        }
+      },
+      "options": {
+        "orientation": "horizontal",
+        "xField": "brand",
+        "showValue": "auto"
+      }
+    },
+    {
+      "id": 7,
+      "type": "table",
+      "title": "Top Brand Sales by Year",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 14
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "exasol_xyz"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "http://exasol_proxy:8000/query",
+          "url_options": {
+            "method": "GET",
+            "params": [
+              {
+                "key": "sql",
+                "value": "SELECT EXTRACT(YEAR FROM i.INVOICE_DATE) AS PERIOD_YEAR, pg.SEGMENT AS SEGMENT, ROUND(SUM(i.UNIT_VALUE), 0) AS SALES FROM <PILOT_SCHEMA>.FACT_PRIMARY i JOIN <PILOT_SCHEMA>.DIM_CATEGORY pg ON i.CATEGORY_KEY = pg.CATEGORY_KEY GROUP BY EXTRACT(YEAR FROM i.INVOICE_DATE), pg.SEGMENT ORDER BY PERIOD_YEAR, SALES DESC"
+              }
+            ]
+          },
+          "root_selector": "",
+          "columns": []
+        }
+      ],
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "id": 8,
+      "type": "table",
+      "title": "Region Performance Ranking",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 14
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "exasol_xyz"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "http://exasol_proxy:8000/query",
+          "url_options": {
+            "method": "GET",
+            "params": [
+              {
+                "key": "sql",
+                "value": "SELECT ROW_NUMBER() OVER (ORDER BY SUM(i.UNIT_VALUE) DESC) AS RANK, r.xyz_PILOT_REGION_1 AS REGION, ROUND(SUM(i.UNIT_VALUE), 0) AS TOTAL_VALUE, ROUND(SUM(i.GROSS_MARGIN), 0) AS TOTAL_GM, COUNT(*) AS LINE_COUNT FROM <PILOT_SCHEMA>.FACT_PRIMARY i JOIN <PILOT_SCHEMA>.DIM_REGION r ON i.REGION_KEY = r.REGION_KEY GROUP BY r.xyz_PILOT_REGION_1 ORDER BY TOTAL_VALUE DESC"
+              }
+            ]
+          },
+          "root_selector": "",
+          "columns": []
+        }
+      ],
+      "options": {
+        "showHeader": true
+      }
+    }
+  ],
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": []
+  }
+}

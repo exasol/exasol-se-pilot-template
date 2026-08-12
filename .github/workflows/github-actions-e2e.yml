@@ -1,0 +1,43 @@
+name: <PILOT_NAME> GitHub Actions E2E (Advisory)
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/**"
+      - "scripts/check_github_actions_e2e.py"
+      - "scripts/check_github_workflow_policy.py"
+      - "generate"
+      - "generate.sh"
+      - "scripts/render_template_placeholders.py"
+      - "docs/30-runbooks/github/XYZ_PILOT_GITHUB_RUNBOOK.md"
+      - "docs/50-testing-validation/**"
+      - "tests/README.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: xyz-pilot-github-actions-e2e-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  workflow-e2e:
+    name: GitHub Actions workflow E2E
+    runs-on: ubuntu-latest
+    # XYZ-PILOT-001: advisory template bootstrap check. Failures surface in the
+    # run page and summary but do not create operator failure-email noise while
+    # generated-project workflow policy is still being tuned.
+    continue-on-error: true
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Run GitHub Actions E2E suite
+        run: python3 scripts/check_github_actions_e2e.py --github-summary

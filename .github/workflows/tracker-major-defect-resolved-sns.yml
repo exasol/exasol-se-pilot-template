@@ -1,0 +1,136 @@
+name: <PILOT_NAME> Tracker Major Defect Resolved SNS
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - docs/XYZ_PILOT_ISSUE_TRACKER.md
+  workflow_dispatch:
+    inputs:
+      base:
+        description: Base git ref for tracker diff classification
+        required: false
+        default: HEAD~1
+      head:
+        description: Head git ref for tracker diff classification
+        required: false
+        default: HEAD
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: <AWS_REGION>
+  ROLE_TO_ASSUME: <AWS_ARN><AWS_ACCOUNT_ID>:role/xyz-pilot-github-resolved-sns
+  SNS_TOPIC_ARN: <AWS_ARN><AWS_REGION>:<AWS_ACCOUNT_ID>:xyz-pilot-major-resolution-heads-up
+
+concurrency:
+  group: xyz-pilot-tracker-resolved-sns-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  classify:
+    name: Classify critical and major resolved tracker defects
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Select tracker diff range
+        id: range
+        run: |
+          set -euo pipefail
+          skip=false
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            base="${{ inputs.base }}"
+            head="${{ inputs.head }}"
+          else
+            base="${{ github.event.before }}"
+            head="${{ github.sha }}"
+            # Guard against history rewrites / new-branch pushes — same class as the
+            # heads-up notifier. A force-push orphans github.event.before, so diffing against
+            # a missing base would re-classify the entire resolved/shipped backlog and re-blast
+            # SNS (incident 2026-06-15, XYZ-PILOT-NNN). Skip when base is force-push/zero/missing/
+            # non-ancestor; classification still runs for the GitHub summary.
+            if [ "${{ github.event.forced }}" = "true" ]; then skip=true; fi
+            if [ "${base}" = "0000000000000000000000000000000000000000" ]; then skip=true; fi
+            if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then skip=true; fi
+            if [ "${skip}" = "false" ] && ! git merge-base --is-ancestor "${base}" "${head}" 2>/dev/null; then skip=true; fi
+          fi
+          echo "base=${base}" >> "${GITHUB_OUTPUT}"
+          echo "head=${head}" >> "${GITHUB_OUTPUT}"
+          echo "skip=${skip}" >> "${GITHUB_OUTPUT}"
+          if [ "${skip}" = "true" ]; then
+            echo "::notice::Tracker resolved-SNS blast skipped — diff base '${base}' is a force-push/orphan/non-ancestor."
+          fi
+
+      - name: Validate subject formats
+        run: python3 scripts/check_tracker_major_defects.py --self-test
+
+      - name: Classify resolved and shipped candidates
+        id: classify
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/xyz-resolved-sns
+          sns_args=()
+          if [ "${{ github.event_name }}" = "push" ] && [ "${{ steps.range.outputs.skip }}" != "true" ]; then
+            sns_args=(
+              --sns-output-dir /tmp/xyz-resolved-sns
+              --sns-topic-arn "${SNS_TOPIC_ARN}"
+            )
+          fi
+          python3 scripts/check_tracker_major_defects.py \
+            --mode resolved \
+            --base "${{ steps.range.outputs.base }}" \
+            --head "${{ steps.range.outputs.head }}" \
+            --github-summary \
+            "${sns_args[@]}"
+          count="$(find /tmp/xyz-resolved-sns -maxdepth 1 -name '*.json' | wc -l | tr -d ' ')"
+          echo "notification_count=${count}" >> "${GITHUB_OUTPUT}"
+
+      - name: Configure AWS credentials for SNS
+        if: github.event_name == 'push' && steps.range.outputs.skip != 'true' && steps.classify.outputs.notification_count != '0'
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          role-to-assume: ${{ env.ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: xyz-pilot-tracker-resolved-sns-${{ github.run_id }}
+
+      - name: Verify SNS has confirmed email subscriptions
+        if: github.event_name == 'push' && steps.range.outputs.skip != 'true' && steps.classify.outputs.notification_count != '0'
+        id: subscriptions
+        run: |
+          set -euo pipefail
+          confirmed="$(aws sns list-subscriptions-by-topic \
+            --region "${AWS_REGION}" \
+            --topic-arn "${SNS_TOPIC_ARN}" \
+            --query 'length(Subscriptions[?Protocol==`email` && SubscriptionArn!=`PendingConfirmation`])' \
+            --output text \
+            --no-cli-pager)"
+          echo "confirmed=${confirmed}" >> "${GITHUB_OUTPUT}"
+          if [ "${confirmed}" = "0" ]; then
+            echo "::warning::Skipping SNS publish because there are no confirmed email subscriptions."
+            exit 0
+          fi
+          echo "SNS publish will fan out to ${confirmed} confirmed email subscription(s); pending subscriptions are excluded by SNS."
+
+      - name: Publish one SNS message per resolved issue
+        if: github.event_name == 'push' && steps.range.outputs.skip != 'true' && steps.classify.outputs.notification_count != '0' && steps.subscriptions.outputs.confirmed != '0'
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          for file in /tmp/xyz-resolved-sns/*.json; do
+            aws sns publish \
+              --region "${AWS_REGION}" \
+              --cli-input-json "file://${file}" \
+              --no-cli-pager > /tmp/xyz-resolved-sns-result.json
+            message_id="$(python3 -c 'import json; print(json.load(open("/tmp/xyz-resolved-sns-result.json")).get("MessageId", "<unknown>"))')"
+            issue_id="$(basename "${file}" .json)"
+            echo "Published ${issue_id} as SNS message ${message_id}"
+          done

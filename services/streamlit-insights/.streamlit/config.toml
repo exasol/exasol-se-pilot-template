@@ -1,0 +1,24 @@
+# <PILOT_NAME> QBR Streamlit — server-side config baked into the container.
+#
+# minCachedMessageSize raised from the 10 KB default to ~1 GB so no
+# ForwardMsg payload becomes eligible for the client-side hash cache.
+# This eliminates the "Cached ForwardMsg MISS [hash=…]" Connection
+# error a browser sees when the Streamlit container restarts (e.g.
+# nightly EC2 stop/start) while a tab is still open: the new server
+# has an empty ForwardMsgCache, the stale browser tab references a
+# hash that no longer exists, and Streamlit raises a Connection
+# error banner. See XYZ-PILOT-032.
+#
+# The cost is a few extra KB per rerun (full message body instead of
+# a hash + cached body). For the QBR dashboard (max ~1 200 rows from
+# MV_* snapshots) this is invisible on any reasonable network.
+[global]
+minCachedMessageSize = 999999999
+
+[browser]
+gatherUsageStats = false
+
+[server]
+headless = true
+# Don't watch for source changes inside the container — production setup.
+fileWatcherType = "none"

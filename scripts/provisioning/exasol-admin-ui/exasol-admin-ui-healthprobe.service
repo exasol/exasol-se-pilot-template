@@ -1,0 +1,7 @@
+[Unit]
+Description=Probe Exasol Admin UI /health and restart exasol-admin-ui.service if down
+After=exasol-admin-ui.service
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/exasol-admin-ui-healthprobe.sh

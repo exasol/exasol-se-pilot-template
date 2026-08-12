@@ -1,0 +1,47 @@
+name: xyz-mcp
+
+# Remote Exasol MCP server for <PILOT_NAME> — lets ChatGPT Web, Claude,
+# VS Code Copilot, and SDK clients connect over HTTP via cloudflared
+# instead of running a local MCP server.
+#
+# Trust model (POC): the stable named Cloudflare URL is public to Pilot
+# subscribers, but every MCP call is gated by FastMCP Cognito OAuth.
+# The server-side DB identity is the shared read-only XYZ_DASH user.
+#
+# XYZ-PILOT-145 adds guarded read-only SQL aliases to the public tool
+# surface while preserving the official Exasol metadata tools.
+
+services:
+  mcp:
+    build: .
+    image: xyz-pilot-exasol-mcp:latest
+    container_name: xyz-mcp-server
+    restart: unless-stopped
+    env_file:
+      - .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      # Keep the upstream metadata tools, enable view discovery, and expose
+      # guarded public SQL through xyz_public_mcp_server.py instead of the
+      # uncapped upstream execute_exasol_query registration.
+      EXA_MCP_SETTINGS: '{"views":{"enable":true},"enable_read_query":false,"enable_write_query":false,"enable_read_bucketfs":false,"enable_write_bucketfs":false}'
+      XYZ_MCP_SQL_MAX_ROWS: "200"
+      XYZ_MCP_SQL_MAX_CHARS: "12000"
+    # Production-hardened (XYZ-PILOT-035): --no-auth dropped. Auth backend
+    # is FastMCP OAuthProxy validating Cognito-issued JWTs (configured
+    # via env vars in .env). Container's port 8000 is only reachable
+    # from the cloudflared sidecar over the docker network.
+    command: ["--host", "0.0.0.0", "--port", "8000"]
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: xyz-mcp-cloudflared
+    restart: unless-stopped
+    # Named tunnel (XYZ-PILOT-035). config.yml lives alongside the
+    # tunnel credentials JSON in /opt/xyz-mcp/cloudflared on the host.
+    command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml run
+    volumes:
+      - /opt/xyz-mcp/cloudflared:/etc/cloudflared:ro
+    depends_on:
+      - mcp

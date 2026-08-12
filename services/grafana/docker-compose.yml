@@ -1,0 +1,108 @@
+name: xyz-grafana
+
+volumes:
+  grafana_data:
+    driver: local
+  prometheus_data:
+    driver: local
+
+services:
+  grafana:
+    image: grafana/grafana:11.6.14  # XYZ-PILOT-082 — CVE-2026-27876, -33376, -33377 patch
+    container_name: xyz-grafana
+    restart: unless-stopped
+    user: "0"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GF_INSTALL_PLUGINS: yesoreyeram-infinity-datasource
+      GF_PATHS_PROVISIONING: /etc/grafana/provisioning
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_SERVER_ROOT_URL: ${GF_SERVER_ROOT_URL:-http://localhost:3000}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/grafana.ini:/etc/grafana/grafana.ini:ro
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    container_name: xyz-prometheus
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=7d"
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - prometheus_data:/prometheus
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      - node_exporter
+
+  node_exporter:
+    image: prom/node-exporter:v1.9.1
+    container_name: xyz-node-exporter
+    restart: unless-stopped
+    command:
+      - "--path.rootfs=/host"
+      - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)"
+    pid: host
+    network_mode: host
+    volumes:
+      - "/:/host:ro,rslave"
+
+  exasol_proxy:
+    build: ./exasol_proxy
+    image: xyz-exasol-proxy:latest
+    container_name: xyz-exasol-proxy
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      EXASOL_LICENSE_SSH_KEY: /run/secrets/exasol_license_ssh_key
+      EXASOL_LICENSE_ARTIFACT_DIR: /tmp/exasol-license-introspect
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    expose:
+      - "8000"
+    volumes:
+      - ${EXASOL_LICENSE_SSH_KEY_PATH:-/dev/null}:/run/secrets/exasol_license_ssh_key:ro
+    healthcheck:
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - "import urllib.request,sys; r=urllib.request.urlopen('http://localhost:8000/health',timeout=3); sys.exit(0 if r.status==200 else 1)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: xyz-grafana-cloudflared
+    restart: unless-stopped
+    # Named tunnel (XYZ-PILOT-025) — stable URL <PROJECT_SLUG>-grafana.<PILOT_DOMAIN>
+    # tunnel UUID fc7e71f1-cdb4-41a2-99f7-4f38a754d850
+    command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml run
+    volumes:
+      - /opt/xyz-grafana/cloudflared:/etc/cloudflared:ro
+    depends_on:
+      grafana:
+        condition: service_healthy

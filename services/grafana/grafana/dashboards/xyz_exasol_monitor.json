@@ -1,0 +1,409 @@
+{
+  "title": "XYZ \u2014 Exasol Personal Monitor",
+  "uid": "xyz-exasol-monitor",
+  "tags": [
+    "xyz",
+    "exasol",
+    "monitor"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 2,
+  "refresh": "30s",
+  "time": {
+    "from": "now-30m",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Active SQL Sessions",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "exasol_xyz"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "http://exasol_proxy:8000/query",
+          "url_options": {
+            "method": "GET",
+            "params": [
+              {
+                "key": "sql",
+                "value": "SELECT COUNT(*) AS METRIC_VALUE FROM EXA_DBA_SESSIONS WHERE STATUS = 'EXECUTE SQL'"
+              }
+            ]
+          },
+          "root_selector": "",
+          "columns": []
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 5
+              },
+              {
+                "color": "red",
+                "value": 20
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Total Sessions",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "exasol_xyz"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "http://exasol_proxy:8000/query",
+          "url_options": {
+            "method": "GET",
+            "params": [
+              {
+                "key": "sql",
+                "value": "SELECT COUNT(*) AS METRIC_VALUE FROM EXA_DBA_SESSIONS"
+              }
+            ]
+          },
+          "root_selector": "",
+          "columns": []
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "DB Size \u2014 RAW (GiB, live)",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 0
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "exasol_xyz"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "http://exasol_proxy:8000/query",
+          "url_options": {
+            "method": "GET",
+            "params": [
+              {
+                "key": "sql",
+                "value": "SELECT ROUND(SUM(RAW_OBJECT_SIZE)/POWER(1024,3), 3) AS METRIC_VALUE FROM EXA_ALL_OBJECT_SIZES WHERE OBJECT_TYPE='TABLE'"
+              }
+            ]
+          },
+          "root_selector": "",
+          "columns": []
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "decgbytes",
+          "decimals": 3
+        }
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "description": "Sum of RAW_OBJECT_SIZE across all <PILOT_SCHEMA> tables, queried live from EXA_ALL_OBJECT_SIZES. Bytes converted to GiB. Updates on every panel refresh (no 30-min sampling lag like EXA_DB_SIZE_LAST_DAY)."
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Queries (last 24 h)",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 0
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "exasol_xyz"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "http://exasol_proxy:8000/query",
+          "url_options": {
+            "method": "GET",
+            "params": [
+              {
+                "key": "sql",
+                "value": "SELECT NVL(SUM(QUERIES), 0) AS METRIC_VALUE FROM EXA_USAGE_LAST_DAY"
+              }
+            ]
+          },
+          "root_selector": "",
+          "columns": []
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "id": 5,
+      "type": "barchart",
+      "title": "Sessions by Status",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 4
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "exasol_xyz"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "http://exasol_proxy:8000/query",
+          "url_options": {
+            "method": "GET",
+            "params": [
+              {
+                "key": "sql",
+                "value": "SELECT STATUS, COUNT(*) AS SESSION_COUNT FROM EXA_DBA_SESSIONS GROUP BY STATUS ORDER BY STATUS"
+              }
+            ]
+          },
+          "root_selector": "",
+          "columns": []
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      },
+      "options": {
+        "orientation": "horizontal",
+        "xField": "status",
+        "showValue": "auto"
+      }
+    },
+    {
+      "id": 6,
+      "type": "table",
+      "title": "Active Sessions Detail",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 4
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "exasol_xyz"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "http://exasol_proxy:8000/query",
+          "url_options": {
+            "method": "GET",
+            "params": [
+              {
+                "key": "sql",
+                "value": "SELECT SESSION_ID, USER_NAME, STATUS, COMMAND_NAME, DURATION, CLIENT, HOST, LOGIN_TIME FROM EXA_DBA_SESSIONS ORDER BY LOGIN_TIME DESC"
+              }
+            ]
+          },
+          "root_selector": "",
+          "columns": []
+        }
+      ],
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "id": 7,
+      "type": "table",
+      "title": "Recent SQL Workload by Command (last 24 h)",
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 12
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "exasol_xyz"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "http://exasol_proxy:8000/query",
+          "url_options": {
+            "method": "GET",
+            "params": [
+              {
+                "key": "sql",
+                "value": "SELECT COMMAND_NAME, CASE WHEN SUCCESS THEN 'Y' ELSE 'N' END AS SUCCESS, COUNT(*) AS STATEMENT_COUNT, ROUND(SUM(NVL(CPU,0)), 2) AS TOTAL_CPU, ROUND(MAX(NVL(TEMP_DB_RAM_PEAK,0)), 2) AS TEMP_DB_RAM_PEAK, NVL(SUM(HDD_READ), 0) AS HDD_READ, NVL(SUM(HDD_WRITE), 0) AS HDD_WRITE, NVL(SUM(NET), 0) AS NET FROM EXA_DBA_AUDIT_SQL WHERE START_TIME >= ADD_HOURS(CURRENT_TIMESTAMP, -24) GROUP BY COMMAND_NAME, SUCCESS ORDER BY STATEMENT_COUNT DESC"
+              }
+            ]
+          },
+          "root_selector": "",
+          "columns": []
+        }
+      ],
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "id": 8,
+      "type": "table",
+      "title": "Current License (ConfD authoritative)",
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 21
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "exasol_xyz"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "http://exasol_proxy:8000/license",
+          "url_options": {
+            "method": "GET"
+          },
+          "root_selector": "",
+          "columns": []
+        }
+      ],
+      "options": {
+        "showHeader": true
+      },
+      "description": "Authoritative Exasol Personal license metadata from ConfD via exasol_proxy. Rows include Runtime, ConfD, Contract, Limits, and Check sections. Use the License Export / Import Controls panel below for a refreshed export and the guarded import plan."
+    },
+    {
+      "id": 9,
+      "type": "text",
+      "title": "License Export / Import Controls",
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 30
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "## License Export / Import Controls\n\n[Export current ConfD license metadata JSON](/api/datasources/proxy/1/license/export?refresh=true)\n\n[Show import/rotation plan](/api/datasources/proxy/1/license/import-plan)\n\n[Open license operations runbook](https://github.com/<GITHUB_OWNER>/<PROJECT_SLUG>/blob/main/docs/30-runbooks/operations/XYZ_PILOT_EXASOL_LICENSE_OPERATIONS.md)\n\nDirect license upload through Grafana is intentionally disabled. Use `scripts/exasol-personal-license-export.sh` to preserve the current file, then `scripts/exasol-personal-license-rotate.sh --apply --confirm-apply` after operator approval. Current rollback backup: `licenses/xyz-pilot-active-personal-license-backup-20260623T195613Z.exasol_license`. After rotation, verify `license_id=2606002028`, `company_name=<CUSTOMER_NAME>`, `expiration_date=2026-09-30`, `max_session_limit=Unlimited`, `license_run_check=OK`, and `db_state=running`.\n"
+      }
+    }
+  ],
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": []
+  }
+}

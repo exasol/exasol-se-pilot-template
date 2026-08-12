@@ -1,0 +1,51 @@
+# XYZ-PILOT-171 — Layer 4 IDE auto-approval guardrail
+#
+# Catches the recurrence vector that defeated XYZ-PILOT-168 Layers 1-3 overnight
+# on 2026-05-30/31: a session-local .vscode/settings.json with
+# `chat.tools.terminal.autoApprove` for prohibited commands (e.g.
+# `git add docs/XYZ_PILOT_ISSUE_TRACKER.md`) auto-approved VS Code Copilot's
+# tracker-staging step and bypassed the XYZ_MASTER single-writer gate.
+#
+# This workflow invokes scripts/check_vscode_autoapprove_safety.py which
+# parses .vscode/settings.json (if present) and fails on any auto-approve
+# entry matching a prohibited pattern (git mutations to main, Lambda
+# deploys, EC2 lifecycle, S3 deploy artifacts, IAM/Secrets mutations,
+# GitHub ruleset changes, Cognito rotations).
+#
+# Per XYZ-PILOT-154 + CLAUDE.md Rule #8: actions/checkout pinned to a full
+# 40-char commit SHA.
+
+name: vscode-autoapprove-safety
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: xyz-pilot-vscode-autoapprove-safety-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: VS Code Copilot auto-approve safety
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Checkout
+        # SHA-pinned per XYZ-PILOT-154 — actions/checkout@v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Only need HEAD — the check is path-and-content-based, not history.
+          fetch-depth: 1
+
+      - name: Run guardrail check
+        run: |
+          set -euo pipefail
+          python3 --version
+          ./scripts/check_vscode_autoapprove_safety.py

@@ -1,0 +1,79 @@
+# gitleaks configuration for the neutral Exasol SE Pilot Template.
+#
+# XYZ-PILOT-072 — CI secret-scan integration. This config extends the
+# gitleaks default ruleset and adds narrow allowlists for template placeholders,
+# public identifiers, and generated project-governance artifacts that can look
+# credential-shaped without being secrets.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Generated tracker, archive, and swarm-test logs can contain redaction markers, commit SHAs, and diagnostic IDs that are not credentials."
+paths = [
+    '''docs/[A-Z]{3}_PILOT_ISSUE_TRACKER\.md$''',
+    '''docs/archive/.*\.md$''',
+    '''tests/logs/runs/.*\.md$''',
+]
+
+[[allowlists]]
+description = "Template placeholder tokens and explicit redaction markers."
+regexes = [
+    '''<PLACEHOLDER>''',
+    '''<REDACTED>''',
+    '''<SECRET-REDACTED-[A-Z]{3}-PILOT-[0-9]{3}>''',
+    '''<AWS_ACCOUNT_ID>''',
+    '''<AWS_PROFILE>''',
+    '''<AWS_REGION>''',
+    '''<AWS_AZ>''',
+    '''<DOMAIN>''',
+    '''<OPERATOR_EMAIL>''',
+    '''<OPERATOR_NAME>''',
+    '''<PILOT_NAME>''',
+    '''<PROJECT_SLUG>''',
+    '''<CUSTOMER_NAME>''',
+]
+
+[[allowlists]]
+description = "Synthetic example AWS account IDs used in neutral template documentation."
+regexes = [
+    '''000000000000''',
+    '''111111111111''',
+    '''123456789012''',
+]
+
+[[allowlists]]
+description = "GitHub and agent noreply email addresses used for commit attribution and notification examples."
+regexes = [
+    '''[0-9]+\+[A-Za-z0-9_.-]+@users\.noreply\.github\.com''',
+    '''noreply@anthropic\.com''',
+    '''noreply@github\.com''',
+    '''noreply@openai\.com''',
+]
+
+[[allowlists]]
+description = "Example public service hostnames and reserved documentation domains."
+regexes = [
+    '''example\.invalid''',
+    '''example\.com''',
+    '''[a-z]{3}-pilot[-a-z0-9]*\.example\.invalid''',
+    '''ec2-[0-9-]+\.[a-z0-9-]+\.compute\.amazonaws\.com''',
+]
+
+[[allowlists]]
+description = "Git commit SHAs in Markdown prose and tracker entries."
+regexes = [
+    '''\b[0-9a-f]{7,40}\b''',
+]
+condition = "AND"
+paths = [
+    '''.*\.md$''',
+]
+
+# Operator notes:
+# - Local full scan:
+#     gitleaks detect --source . --config .gitleaks.toml --no-banner --redact --verbose
+# - Local staged scan:
+#     gitleaks protect --staged --source . --config .gitleaks.toml --no-banner --redact
+# - Any allowlist expansion must cite a concrete generated-template reason or
+#   an approved XYZ-PILOT issue.

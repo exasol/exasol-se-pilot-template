@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# XYZ-PILOT-168 — commit-msg hook for AI-attribution discipline (CLAUDE.md Rule #11).
+#
+# Non-blocking: warns when an AI session is detected and the commit
+# message lacks a `Co-Authored-By:` trailer. Never fails the commit.
+#
+# Installed via: ./scripts/install_attribution_hook.sh
+# Detection currently covers Claude Code (env CLAUDECODE=1). Add other
+# agents' stable session-marker env vars as they become known.
+#
+# Hook contract: $1 = path to commit message file, $2 = source flag
+# (message, template, merge, squash, commit -c <obj>, etc.)
+
+set -eu
+
+MSG_FILE="${1:-}"
+SOURCE="${2:-}"
+
+# Skip non-regular commits — merge / squash / fixup messages either copy
+# a prior message or are template-driven and shouldn't be policed.
+case "$SOURCE" in
+    merge|squash|fixup) exit 0 ;;
+esac
+
+# If a Co-Authored-By: trailer is already present, the commit is compliant.
+if [[ -n "$MSG_FILE" && -f "$MSG_FILE" ]] && grep -qiE '^Co-[Aa]uthored-[Bb]y:' "$MSG_FILE"; then
+    exit 0
+fi
+
+# Detect active AI session. Currently Claude Code only — extend as other
+# agents publish stable session-marker env vars.
+AGENT=""
+SUGGESTED=""
+if [[ "${CLAUDECODE:-0}" == "1" ]]; then
+    AGENT="Claude Code"
+    SUGGESTED="Co-Authored-By: Claude Opus 4.7 (1M context) <<OPERATOR_EMAIL>>"
+fi
+
+if [[ -z "$AGENT" ]]; then
+    # No AI activity detected → presume human commit, exit silently.
+    exit 0
+fi
+
+cat >&2 <<EOF
+========================================================================
+XYZ-PILOT-168 attribution heads-up — ${AGENT} session active (env
+CLAUDECODE=1), but the commit message lacks a Co-Authored-By: trailer.
+
+If this commit IS ${AGENT}-authored, add this trailer per CLAUDE.md
+Rule #11 (cancel + retry with the trailer in the message body):
+
+  ${SUGGESTED}
+
+If this commit is YOU (human) typing in a terminal that happens to be
+inside a ${AGENT} session, ignore this — leave the commit as-is.
+
+This hook is non-blocking; the commit will proceed.
+========================================================================
+EOF
+
+exit 0

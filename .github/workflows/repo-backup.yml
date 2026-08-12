@@ -1,0 +1,110 @@
+name: <PILOT_NAME> Repo Backup
+
+on:
+  # Template safety: generated projects may re-enable this schedule after the
+  # backup bucket and GitHub OIDC role are configured.
+  # schedule:
+  #   - cron: "0 3 * * *"
+  #   - cron: "0 9,13,17 * * 1-5"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: xyz-pilot-repo-backup
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: <AWS_REGION>
+  BACKUP_BUCKET: xyz-pilot-repo-backups-<AWS_ACCOUNT_ID>
+  ROLE_TO_ASSUME: <AWS_ARN><AWS_ACCOUNT_ID>:role/xyz-pilot-github-repo-backup
+  REPOSITORY_NAME: <PROJECT_SLUG>
+
+jobs:
+  mirror-to-s3:
+    name: Mirror repository to S3
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ env.ROLE_TO_ASSUME }}
+          role-session-name: xyz-pilot-repo-backup-${{ github.run_id }}
+
+      - name: Create mirror archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          umask 077
+
+          stamp="$(date -u +'%Y%m%dT%H%M%SZ')"
+          short_sha="${GITHUB_SHA::12}"
+          backup_base="${REPOSITORY_NAME}_${stamp}_${short_sha}"
+          date_path="$(date -u +'%Y/%m/%d')"
+
+          mkdir -p backup
+          git clone --mirror "https://${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "backup/${REPOSITORY_NAME}.git"
+          git -C "backup/${REPOSITORY_NAME}.git" fsck --full
+
+          tar -C backup -czf "${backup_base}.git.tar.gz" "${REPOSITORY_NAME}.git"
+          sha256sum "${backup_base}.git.tar.gz" > "${backup_base}.git.tar.gz.sha256"
+
+          {
+            echo "BACKUP_FILE=${backup_base}.git.tar.gz"
+            echo "CHECKSUM_FILE=${backup_base}.git.tar.gz.sha256"
+            echo "DATE_PATH=${date_path}"
+          } >> "${GITHUB_ENV}"
+
+      - name: Upload backup to S3
+        run: |
+          set -euo pipefail
+
+          metadata="repository=${GITHUB_REPOSITORY},commit-sha=${GITHUB_SHA},workflow-run-id=${GITHUB_RUN_ID},xyz-pilot=XYZ-PILOT-088"
+          daily_uri="s3://${BACKUP_BUCKET}/daily/${DATE_PATH}/${BACKUP_FILE}"
+
+          aws s3 cp "${BACKUP_FILE}" "${daily_uri}" --only-show-errors --metadata "${metadata}"
+          aws s3 cp "${CHECKSUM_FILE}" "${daily_uri}.sha256" --only-show-errors --metadata "${metadata}"
+
+          aws s3 cp "${BACKUP_FILE}" "s3://${BACKUP_BUCKET}/latest/${REPOSITORY_NAME}.git.tar.gz" --only-show-errors --metadata "${metadata}"
+          aws s3 cp "${CHECKSUM_FILE}" "s3://${BACKUP_BUCKET}/latest/${REPOSITORY_NAME}.git.tar.gz.sha256" --only-show-errors --metadata "${metadata}"
+
+          if [ "$(date -u +'%d')" = "01" ]; then
+            aws s3 cp "${BACKUP_FILE}" "s3://${BACKUP_BUCKET}/monthly/$(date -u +'%Y/%m')/${BACKUP_FILE}" --only-show-errors --metadata "${metadata}"
+            aws s3 cp "${CHECKSUM_FILE}" "s3://${BACKUP_BUCKET}/monthly/$(date -u +'%Y/%m')/${CHECKSUM_FILE}" --only-show-errors --metadata "${metadata}"
+          fi
+
+          if [ "$(date -u +'%m-%d')" = "01-01" ]; then
+            aws s3 cp "${BACKUP_FILE}" "s3://${BACKUP_BUCKET}/yearly/$(date -u +'%Y')/${BACKUP_FILE}" --only-show-errors --metadata "${metadata}"
+            aws s3 cp "${CHECKSUM_FILE}" "s3://${BACKUP_BUCKET}/yearly/$(date -u +'%Y')/${CHECKSUM_FILE}" --only-show-errors --metadata "${metadata}"
+          fi
+
+          printf '{"repository":"%s","commit_sha":"%s","workflow_run_id":"%s","backup_uri":"%s","created_at_utc":"%s"}\n' \
+            "${GITHUB_REPOSITORY}" \
+            "${GITHUB_SHA}" \
+            "${GITHUB_RUN_ID}" \
+            "${daily_uri}" \
+            "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" > latest.json
+          aws s3 cp latest.json "s3://${BACKUP_BUCKET}/latest/latest.json" --only-show-errors --metadata "${metadata}"
+
+      - name: Restore validation
+        run: |
+          set -euo pipefail
+
+          mkdir -p restore
+          aws s3 cp "s3://${BACKUP_BUCKET}/daily/${DATE_PATH}/${BACKUP_FILE}" restore/restore.git.tar.gz --only-show-errors
+          aws s3 cp "s3://${BACKUP_BUCKET}/daily/${DATE_PATH}/${BACKUP_FILE}.sha256" restore/restore.git.tar.gz.sha256 --only-show-errors
+
+          (
+            cd restore
+            sed "s#${BACKUP_FILE}#restore.git.tar.gz#" restore.git.tar.gz.sha256 | sha256sum -c -
+            tar -xzf restore.git.tar.gz
+            git -C "${REPOSITORY_NAME}.git" fsck --full
+            restored_sha="$(git -C "${REPOSITORY_NAME}.git" rev-parse refs/heads/main)"
+            test "${restored_sha}" = "${GITHUB_SHA}"
+          )

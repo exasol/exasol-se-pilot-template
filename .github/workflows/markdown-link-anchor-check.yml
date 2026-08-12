@@ -1,0 +1,40 @@
+name: <PILOT_NAME> Markdown Link / Anchor Check (Advisory)
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "**/*.md"
+      - "scripts/check_markdown_links.py"
+      - ".github/workflows/markdown-link-anchor-check.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: xyz-pilot-markdown-links-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  markdown-links:
+    name: Markdown links and anchors
+    runs-on: ubuntu-latest
+    # XYZ-PILOT-198: advisory workflow — job-level continue-on-error so failures
+    # surface as warnings in the run page + step summary but do NOT fire a
+    # GitHub failure-notification email. Advisory checks are signal, not gate.
+    continue-on-error: true
+    timeout-minutes: 8
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Compile markdown link checker
+        run: python3 -m py_compile scripts/check_markdown_links.py
+
+      - name: Run markdown link / anchor check
+        run: python3 scripts/check_markdown_links.py --github-summary

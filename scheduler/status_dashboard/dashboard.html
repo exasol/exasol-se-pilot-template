@@ -1,0 +1,2649 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title><PILOT_NAME> — Operator Dashboard</title>
+<link rel="icon"             href="favicon-32.png"  sizes="32x32"   type="image/png">
+<link rel="icon"             href="favicon-192.png" sizes="192x192" type="image/png">
+<link rel="apple-touch-icon" href="favicon-192.png">
+<!--
+  <PILOT_NAME> — Cognito-gated EC2 control dashboard (XYZ-PILOT-063 mitigation).
+
+  Architecture (mirrors XYZ-PILOT-074):
+    Cognito User Pool (PKCE, no client secret)
+        ──▶  Cognito Identity Pool  (xyz_pilot_secret_retrievers)
+        ──▶  temp AWS creds (1h TTL, scoped to invoke 3 Lambdas + ec2:Describe)
+        ──▶  invoke xyz-pilot-start / xyz-pilot-stop + describe instance state
+
+  Why this replaces the old s3-website dashboard:
+    The old dashboard's Start button posted to a public Lambda Function URL
+    (AuthType=NONE) with a bearer token embedded in the HTML. AWS expanded
+    its account-level "Block Public Access for Lambda Function URLs" rollout
+    in May 2026 — unauthenticated POSTs now return HTTP 403 regardless of the
+    function's resource policy. This page solves the cold-start problem
+    (EC2 down → chatbot down → no Start path) by relying on Cognito SSO
+    instead of a public bearer token.
+
+  Hosting:
+    CloudFront HTTPS endpoint in front of the private status bucket:
+    https://<PROJECT_SLUG>-dashboard.<PILOT_DOMAIN>/dashboard.html
+-->
+<style>
+  body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+         max-width: 760px; margin: 2em auto; padding: 0 1em; color: #222;
+         line-height: 1.5; }
+  .title-row { display:flex; align-items:center; justify-content:space-between; gap:.8em; margin-bottom:.2em; }
+  h1 { font-size: 1.6em; margin: 0; }
+  .sub { color: #666; font-size: .9em; margin-bottom: 1.5em; }
+  .sub.provenance { margin-top: -1.2em; }
+  .sub.provenance a { color: #666; text-decoration: none; font-weight: 600; }
+  .sub.provenance a:hover { text-decoration: underline; }
+  .top-auth { margin: 0; flex: 0 0 auto; }
+  .top-auth button { font-size: .9em; padding: .45em .85em; }
+  .conf-note { background:#fff8e6; border:1px solid #f0c36d; border-radius:6px;
+               padding:8px 10px; font-size:.88em; color:#5f4b00; margin-bottom:1em; }
+  .card { background: #f6f8fa; border: 1px solid #d0d7de;
+          border-radius: 6px; padding: 16px 20px; margin: 1em 0; }
+  .state { font-size: 1.4em; margin: .3em 0; }
+  button { font-size: 1em; padding: .6em 1.2em; margin: .3em .3em .3em 0;
+           border: 1px solid #d0d7de; border-radius: 6px; cursor: pointer;
+           background: #fff; }
+  button:hover:not(:disabled) { background: #f0f0f0; }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  button.primary { background: #1AAB40; color: #fff; border-color: #1AAB40; }
+  button.danger  { background: #C0392B; color: #fff; border-color: #C0392B; }
+  /* XYZ-PILOT-290: operator-resizable log panel. Drag the bottom edge to any
+     height (no max cap); height persists in localStorage. Default taller than
+     the old 240px cap; min-height keeps it usable when collapsed. */
+  #log { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+         font-size: .85em; background: #1f2328; color: #d1d9e0;
+         padding: 12px 16px; border-radius: 6px;
+         white-space: pre-wrap; overflow: auto;
+         min-height: 120px; height: 280px; resize: vertical; }
+  #log div { margin: 2px 0; }
+  #logBar { display: flex; align-items: center; gap: .5em; margin: .3em 0 .2em; }
+  #logBar .hint { font-size: .78em; color: #8b949e; }
+  #logBar button { font-size: .8em; padding: .25em .7em; margin: 0; }
+  .err { color: #ff7b72; }
+  .ok  { color: #56d364; }
+  .meta { font-size: .8em; color: #666; margin-top: 1.5em; }
+  .meta code { background: #f0f0f0; padding: 1px 4px; border-radius: 3px; }
+  .locked-card { opacity: .55; filter: grayscale(.25); }
+  .pill { display:inline-block; padding:2px 7px; border-radius:3px;
+          font-size:.78em; font-weight:600; background:#eaeef2; color:#444; }
+  .pill.major, .pill.critical { background:#C0392B; color:#fff; }
+  .pill.feature { background:#6f42c1; color:#fff; }
+  .pill.minor { background:#57606a; color:#fff; }
+  .group-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr));
+                gap:.25em .7em; font-size:.9em; margin-top:.35em; }
+  .group-grid label.disabled { color:#888; cursor:not-allowed; }
+  .group-grid label.disabled input { cursor:not-allowed; }
+
+  /* XYZ-PILOT-172 — in-flight spinner + elapsed-time counter (Fix B Component 1) */
+  .spinner { display: inline-block; width: 14px; height: 14px;
+             border: 2px solid #d0d7de; border-top-color: #1AAB40;
+             border-radius: 50%; animation: xyzSpin .9s linear infinite;
+             vertical-align: -2px; margin-right: 6px; }
+  .spinner.danger { border-top-color: #C0392B; }
+  @keyframes xyzSpin { to { transform: rotate(360deg); } }
+  .inflight-status { display: inline-block; color: #555; font-size: .95em; }
+  .inflight-status.ok { color: #1AAB40; font-weight: 600; }
+  .inflight-status.err { color: #C0392B; font-weight: 600; }
+  #inflight { margin: .6em 0 .2em 0; padding: .4em .6em;
+              background: #fff; border: 1px dashed #d0d7de;
+              border-radius: 4px; }
+</style>
+</head>
+<body>
+
+<div class="title-row">
+  <h1 id="dashboardTitle"><PILOT_NAME> — Operator Dashboard</h1>
+  <div class="top-auth" id="topAuthBar" style="display:none;">
+    <button id="topLogoutBtn" title="Sign out from Cognito and return to dashboard sign-in">↪ Logout</button>
+  </div>
+</div>
+<p class="sub">Cognito-authenticated EC2 control · Pilot account <AWS_ACCOUNT_ID></p>
+<p class="sub provenance" id="deployment-meta">XYZ-PILOT-150 · deployment metadata loading…</p>
+<div class="conf-note">
+  Confidential - <PILOT_NAME> - © Exasol AG · ESL © <SEMANTIC_LAYER_VENDOR> ·
+  for XYZ evaluation use only.
+</div>
+
+<div id="signin" style="display:none">
+  <div class="card">
+    <p>Sign in with your <PILOT_NAME> Cognito subscriber credentials (same as the chatbot).</p>
+    <button id="signinBtn" class="primary">Sign in with Cognito</button>
+  </div>
+</div>
+
+<div id="loading" style="display:none">
+  <div class="card">Loading…</div>
+</div>
+
+<div id="dashboard" style="display:none">
+  <div class="card">
+    <div>EC2 instance <code id="iid"><EC2_INSTANCE_ID></code> ·
+         <span id="ec2-region" style="color:#666;font-size:.85em;"><AWS_REGION></span></div>
+    <div class="state" id="state">…</div>
+    <div>
+      <button id="startBtn" class="primary">▶ Start</button>
+      <button id="stopBtn"  class="danger">⏹ Stop</button>
+      <button id="refreshBtn">↻ Refresh</button>
+      <span id="user" style="float:right;color:#666;font-size:.85em;"></span>
+    </div>
+    <!-- XYZ-PILOT-172 — in-flight indicator (Fix B Component 1) -->
+    <div id="inflight" style="display:none;">
+      <span class="spinner" id="inflight-spinner"></span>
+      <span class="inflight-status" id="inflight-text">…</span>
+    </div>
+    <!-- XYZ-PILOT-173 follow-up — ops-only notification restriction. When
+         checked, the next Start/Stop invocation passes test_mode=true to the
+         Lambda, which restricts the AD-HOC notification email to OPS_ONLY +
+         XYZ_OPS instead of the full subscriber list. EC2 behaviour is
+         unchanged — only the email recipient set narrows.
+
+         Default: CHECKED on every dashboard load. Operators wanting to notify
+         the full subscriber list must uncheck the box BEFORE clicking Start/Stop. -->
+    <label id="test-mode-label" style="display:block;margin:.5em 0 0 0;
+                font-size:.85em;color:#666;cursor:pointer;">
+      <input type="checkbox" id="testModeCb" checked
+             style="vertical-align:-2px;margin-right:.4em;">
+      Ops-only notification (email goes to OPS_ONLY &amp; XYZ_OPS only,
+      not the full team). <b>Default ON</b> — uncheck to notify the full subscriber list.
+    </label>
+    <div class="meta" id="last-updated">Last update —</div>
+  </div>
+
+  <div class="card">
+    <h3 style="margin:0 0 .6em 0;font-size:1.05em;">Service URIs</h3>
+    <table id="services" style="width:100%;border-collapse:collapse;font-size:.9em;">
+      <thead>
+        <tr style="text-align:left;border-bottom:1px solid #d0d7de;">
+          <th style="padding:6px 8px;">Service</th>
+          <th style="padding:6px 8px;">ServiceURI</th>
+          <th style="padding:6px 8px;">Availability</th>
+        </tr>
+      </thead>
+      <tbody id="services-body"></tbody>
+    </table>
+    <div class="meta" style="margin-top:.6em;font-size:.8em;color:#666;">
+      Availability uses Cognito-gated server-side probes for tunnel-backed
+      HTTP services and EC2 state for DB/SSH. The Operator Dashboard itself
+      stays reachable regardless because it's served from S3.
+    </div>
+  </div>
+
+  <!-- XYZ-PILOT-081: Cognito-gated retrieval of all <PILOT_NAME> service passwords. -->
+  <div class="card" id="secretCard">
+    <h3 style="margin:0 0 .5em 0;font-size:1.05em;">🔑 Service Password Retrieval</h3>
+    <p style="margin:0 0 .8em 0;font-size:.9em;color:#444;">
+      Pick a credential below and click <b>Reveal</b>. The value is fetched
+      via <code>xyz-pilot-get-secret</code> using your Cognito identity
+      and clears from this page after 30 s.
+    </p>
+    <div style="display:flex;gap:.5em;flex-wrap:wrap;align-items:center;">
+      <select id="secretSelect" style="flex:1;min-width:240px;padding:.5em .7em;
+              border:1px solid #d0d7de;border-radius:4px;background:#fff;font-size:.95em;">
+        <option value="">— loading available secrets …</option>
+      </select>
+      <button id="revealBtn" class="primary" style="white-space:nowrap;">🔓 Reveal</button>
+      <button id="copySecretBtn" style="white-space:nowrap;" disabled>📋 Copy</button>
+      <button id="hideSecretBtn" style="white-space:nowrap;" disabled>🙈 Hide</button>
+    </div>
+    <div id="secretOut" style="margin-top:.8em;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+         font-size:.95em;padding:8px 12px;background:#f6f8fa;border:1px solid #d0d7de;
+         border-radius:4px;min-height:1.4em;color:#555;">(no value yet)</div>
+    <div class="meta" style="margin-top:.6em;font-size:.8em;color:#666;">
+      Auto-hides after 30 s · backed by SSM Parameter Store SecureString ·
+      Lambda role allowlist-gated to the 7 Cognito subscribers · every
+      retrieval is logged to CloudWatch (email, secret-id, version — value
+      itself is never logged).
+    </div>
+  </div>
+
+  <!-- XYZ-PILOT-290: resizable log panel controls -->
+  <div id="logBar">
+    <button id="logExpandBtn" type="button" title="Expand the log panel to full height (or collapse back)">⤢ Expand</button>
+    <span class="hint">Drag the bottom edge to resize · size is remembered on this device</span>
+  </div>
+  <div id="log"></div>
+  <div class="meta">
+    Invokes <code>xyz-pilot-start</code> / <code>xyz-pilot-stop</code> /
+    <code>xyz-pilot-get-secret</code> / <code>xyz-pilot-user-mgmt</code> Lambdas via
+    Cognito Identity Pool <code><AWS_REGION>:1face40a-…</code> ·
+    EC2 state polled every 10 s via <code>ec2:DescribeInstances</code> ·
+    Cognito user pool <code><COGNITO_USER_POOL_ID></code>.
+    Replaces the legacy s3-website dashboard (XYZ-PILOT-063 mitigation);
+    extends XYZ-PILOT-074 to all <PILOT_NAME> service credentials (XYZ-PILOT-081).
+  </div>
+
+  <!-- XYZ-PILOT-116 + XYZ-PILOT-115(b) + XYZ-PILOT-117(f): New User Onboarding Facility.
+       Moved to the bottom (below the log view) 2026-05-27 per <OPERATOR_NAME>'s UI
+       directive — the onboarding card is referenced infrequently compared to
+       the EC2 controls + password retrieval, so subscribers see the primary
+       affordances first on page load. -->
+  <div class="card">
+    <h3 style="margin:0 0 .5em 0;font-size:1.05em;">👤 New User Onboarding Facility</h3>
+    <p style="margin:0 0 .8em 0;font-size:.9em;color:#444;">
+      Invite a new subscriber to both AWS SES (daily-status emails) and AWS Cognito
+      (Chatbot + Operator Dashboard login) in one shot. View the current cohort,
+      look up an individual user's status, or pull pool-wide sign-in history.
+      Backed by <code>xyz-pilot-user-mgmt</code>.
+    </p>
+
+    <!-- Row 1: Invite by email -->
+    <div style="display:flex;gap:.5em;flex-wrap:wrap;align-items:center;margin-bottom:.5em;">
+      <input id="onboardEmail" type="email" placeholder="new-user@example.com"
+             style="flex:1;min-width:240px;padding:.5em .7em;border:1px solid #d0d7de;
+                    border-radius:4px;background:#fff;font-size:.95em;" />
+      <button id="onboardInviteBtn" class="primary" style="white-space:nowrap;">📨 Invite</button>
+    </div>
+    <fieldset id="onboardGroupFieldset"
+              style="border:1px solid #d0d7de;border-radius:6px;padding:.45em .75em .7em;margin:0 0 .7em 0;">
+      <legend style="font-size:.86em;color:#555;padding:0 .3em;">Cognito groups</legend>
+      <div class="group-grid">
+        <label><input type="radio" name="inviteTargetGroup" id="inviteGroupOpsOnly" value="OPS_ONLY"> <PILOT_NAME> OPS (=OPS_ONLY)</label>
+        <label><input type="radio" name="inviteTargetGroup" id="inviteGroupPilot" value="XYZ_PILOT"> <PILOT_NAME> User (=XYZ_PILOT)</label>
+        <label><input type="radio" name="inviteTargetGroup" id="inviteGroupHpcOps" value="XYZ_OPS"> XYZ_OPS (=XYZ_OPS)</label>
+        <label><input type="radio" name="inviteTargetGroup" id="inviteGroupHpcBiz" value="XYZ_BIZ" checked> XYZ_BIZ (=XYZ_BIZ)</label>
+      </div>
+      <div id="onboardGroupHint" class="meta" style="margin-top:.45em;font-size:.8em;color:#666;">
+        Choose exactly one target Cognito group. OPS_ONLY can assign all groups; XYZ_OPS can assign only XYZ_OPS or XYZ_BIZ. XYZ_BIZ is the default.
+      </div>
+    </fieldset>
+
+    <!-- Row 2: Cohort + registered list -->
+    <div style="display:flex;gap:.5em;flex-wrap:wrap;align-items:center;margin-bottom:.5em;">
+      <button id="onboardCohortBtn" style="white-space:nowrap;">📊 Cohort table</button>
+      <button id="onboardRegisteredBtn" style="white-space:nowrap;">✓ Registered users</button>
+    </div>
+
+    <!-- Row 3: Individual lookup + login history (XYZ-PILOT-115b + XYZ-PILOT-117) -->
+    <div style="display:flex;gap:.5em;flex-wrap:wrap;align-items:center;margin-bottom:.6em;">
+      <select id="onboardUserSelect" style="flex:1;min-width:240px;padding:.5em .7em;
+              border:1px solid #d0d7de;border-radius:4px;background:#fff;font-size:.95em;">
+        <option value="">— select a registered user …</option>
+      </select>
+      <button id="onboardStatusBtn" style="white-space:nowrap;">🔍 Individual status</button>
+      <button id="onboardLoginHistoryBtn" style="white-space:nowrap;">📅 Login history (30 d)</button>
+    </div>
+
+    <div id="onboardOut" style="margin-top:.4em;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+         font-size:.85em;padding:10px 12px;background:#f6f8fa;border:1px solid #d0d7de;
+         border-radius:4px;min-height:1.4em;color:#444;white-space:pre-wrap;
+         max-height:420px;overflow-y:auto;">(no result yet)</div>
+
+    <div class="meta" style="margin-top:.6em;font-size:.8em;color:#666;">
+      Invite = Cognito <code>AdminCreateUser</code> (sends temp-password email)
+      + SES <code>VerifyEmailIdentity</code> (sends AWS verification email).
+      Both are idempotent. Cohort = grouped by Cognito <code>UserStatus</code>
+      plus <code>DEACTIVATED</code> when a user declined Pilot participation or
+      Cognito is disabled. Registered = users who completed BOTH halves
+      (Cognito CONFIRMED + SES Success).
+      Login history = per-user Cognito ASF events from 2026-05-27 10:25 CEST
+      onward + legacy CloudTrail pool-wide sign-in aggregates/admin actions for
+      pre-ASF context. (CloudTrail hosted-UI OAuth events lack per-user
+      attribution — see XYZ-PILOT-117/XYZ-PILOT-146 notes.)
+    </div>
+  </div>
+
+  <!-- XYZ-PILOT-127 / XYZ-PILOT-259: GitHub Repository Commit Retriever —
+       collaborator dropdown + by-date search. Backed by xyz-pilot-user-mgmt
+       Lambda actions github_collaborators, github_commits,
+       github_commits_on_date. The Lambda carries GITHUB_TOKEN_SECRET_ID plus
+       rollback-only GITHUB_TOKEN_PARAM and retrieves the PAT from Secrets
+       Manager first, SSM fallback second. -->
+  <div class="card" id="githubCommitCard">
+    <h3 style="margin:0 0 .5em 0;font-size:1.05em;">🌿 GitHub Repository Commit Retriever</h3>
+    <p style="margin:0 0 .8em 0;font-size:.9em;color:#444;">
+      Audit commits on <code><GITHUB_OWNER>/<PROJECT_SLUG></code> by
+      collaborator or by date. Shows SHA · date · author · subject · files
+      changed + line counts. Useful for verifying who shipped what and when
+      without dropping to a terminal.
+    </p>
+
+    <!-- Row 1: by-collaborator -->
+    <div style="display:flex;gap:.5em;flex-wrap:wrap;align-items:center;margin-bottom:.5em;">
+      <select id="ghCollabSelect" style="flex:1;min-width:240px;padding:.5em .7em;
+              border:1px solid #d0d7de;border-radius:4px;background:#fff;font-size:.95em;">
+        <option value="">— select a collaborator …</option>
+      </select>
+      <input id="ghDaysInput" type="number" min="1" max="90" value="30"
+             style="width:80px;padding:.5em .7em;border:1px solid #d0d7de;
+                    border-radius:4px;background:#fff;font-size:.95em;" title="days back" />
+      <button id="ghByAuthorBtn" style="white-space:nowrap;">👤 Commits by author</button>
+    </div>
+
+    <!-- Row 2: by-date -->
+    <div style="display:flex;gap:.5em;flex-wrap:wrap;align-items:center;margin-bottom:.6em;">
+      <input id="ghDateInput" type="date" value=""
+             style="flex:0 0 200px;padding:.5em .7em;border:1px solid #d0d7de;
+                    border-radius:4px;background:#fff;font-size:.95em;" />
+      <button id="ghYesterdayBtn" style="white-space:nowrap;">📆 Yesterday</button>
+      <button id="ghTodayBtn" style="white-space:nowrap;">📆 Today</button>
+      <button id="ghByDateBtn" style="white-space:nowrap;">📅 Commits on date</button>
+    </div>
+
+    <div id="ghOut" style="margin-top:.4em;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+         font-size:.85em;padding:10px 12px;background:#f6f8fa;border:1px solid #d0d7de;
+         border-radius:4px;min-height:1.4em;color:#444;white-space:pre-wrap;
+         max-height:480px;overflow-y:auto;">(no result yet)</div>
+
+    <div class="meta" style="margin-top:.6em;font-size:.8em;color:#666;">
+      Backed by <code>xyz-pilot-user-mgmt</code> actions
+      <code>github_collaborators</code> / <code>github_commits</code> /
+      <code>github_commits_on_date</code>. The collaborator-dropdown lists
+      the repository's <code>repo:collaborators</code> roster — which is
+      a SUPERSET of the Cognito subscriber pool (e.g. external committers
+      on personal GitHub identities, not in Cognito).
+    </div>
+  </div>
+
+  <!-- XYZ-PILOT-215: Elevated-operator XYZ_MASTER approval queue. -->
+  <div class="card" id="xyzMasterCard">
+    <h3 style="margin:0 0 .5em 0;font-size:1.05em;">✅ XYZ_MASTER Candidate Approval Backlog</h3>
+    <p style="margin:0 0 .8em 0;font-size:.9em;color:#444;">
+      Review pending defect / enhancement candidates and existing issue
+      close-out requests before the central tracker is mutated. Elevated
+      operators can deny candidates or launch the
+      deterministic background filing workflow. Non-elevated users see this
+      section read-only and greyed out.
+    </p>
+
+    <div id="xyzMasterAuth" class="meta" style="margin:.2em 0 .8em 0;">Authorization unknown.</div>
+
+    <div style="display:flex;gap:.5em;flex-wrap:wrap;align-items:center;margin-bottom:.5em;">
+      <button id="xyzMasterRefreshBtn" style="white-space:nowrap;">↻ Refresh backlog</button>
+      <select id="xyzMasterCandidateSelect" style="flex:1;min-width:260px;padding:.5em .7em;
+              border:1px solid #d0d7de;border-radius:4px;background:#fff;font-size:.95em;">
+        <option value="">— refresh to load pending candidates …</option>
+      </select>
+    </div>
+
+    <div style="display:flex;gap:.5em;flex-wrap:wrap;align-items:center;margin-bottom:.5em;">
+      <select id="xyzMasterSeveritySelect" style="min-width:150px;padding:.5em .7em;
+              border:1px solid #d0d7de;border-radius:4px;background:#fff;font-size:.95em;">
+        <option value="minor">minor</option>
+        <option value="major">major</option>
+        <option value="critical">critical</option>
+        <option value="feature">feature</option>
+        <option value="external">external</option>
+        <option value="hygiene">hygiene</option>
+        <option value="status">status</option>
+      </select>
+      <select id="xyzMasterModeSelect" style="min-width:130px;padding:.5em .7em;
+              border:1px solid #d0d7de;border-radius:4px;background:#fff;font-size:.95em;">
+        <option value="dry-run">dry-run</option>
+        <option value="pr">create PR</option>
+        <option value="direct-main">direct-main</option>
+      </select>
+      <button id="xyzMasterApproveBtn" class="primary" style="white-space:nowrap;">✓ Approve / launch</button>
+    </div>
+
+    <div style="display:flex;gap:.5em;flex-wrap:wrap;align-items:center;margin-bottom:.6em;">
+      <select id="xyzMasterDenyReasonSelect" style="min-width:150px;padding:.5em .7em;
+              border:1px solid #d0d7de;border-radius:4px;background:#fff;font-size:.95em;">
+        <option value="duplicate">duplicate</option>
+        <option value="wontfix">wontfix</option>
+        <option value="invalid">invalid</option>
+        <option value="out-of-scope">out-of-scope</option>
+      </select>
+      <input id="xyzMasterDuplicateOfInput" type="text" placeholder="duplicate of XYZ-PILOT-NNN"
+             style="flex:1;min-width:190px;padding:.5em .7em;border:1px solid #d0d7de;
+                    border-radius:4px;background:#fff;font-size:.95em;" />
+      <button id="xyzMasterDenyBtn" class="danger" style="white-space:nowrap;">✗ Deny</button>
+    </div>
+
+    <div id="xyzMasterOut" style="margin-top:.4em;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+         font-size:.85em;padding:10px 12px;background:#f6f8fa;border:1px solid #d0d7de;
+         border-radius:4px;min-height:1.4em;color:#444;white-space:pre-wrap;
+         max-height:520px;overflow-y:auto;">(no candidate loaded yet)</div>
+
+    <div class="meta" style="margin-top:.6em;font-size:.8em;color:#666;">
+      Backed by <code>xyz-pilot-user-mgmt</code> actions
+      <code>xyz_master_candidates</code> /
+      <code>xyz_master_candidate_detail</code> /
+      <code>xyz_master_dispatch_candidate</code> /
+      <code>xyz_master_deny_candidate</code>. Approval dispatches
+      <code>XYZ_MASTER Background Filing (Manual)</code>; PR mode still
+      requires GitHub review/merge before the tracker changes, while
+      direct-main is reserved for elevated-operator low-risk new filings and
+      existing-issue status transitions. Severity elevation requests are shown
+      in the dedicated panel below.
+    </div>
+  </div>
+
+  <!-- XYZ-PILOT-219: Dedicated existing-defect priority elevation queue. -->
+  <div class="card" id="xyzElevationCard">
+    <h3 style="margin:0 0 .5em 0;font-size:1.05em;">↗ Defect Priority Elevation</h3>
+    <p style="margin:0 0 .8em 0;font-size:.9em;color:#444;">
+      Find current Open tracker items and elevate or downgrade their priority without
+      mixing that action into the candidate approval backlog.
+    </p>
+
+    <div id="xyzElevationAuth" class="meta" style="margin:.2em 0 .8em 0;">Authorization unknown.</div>
+
+    <div style="display:flex;gap:.5em;flex-wrap:wrap;align-items:center;margin-bottom:.5em;">
+      <button id="xyzElevationRefreshBtn" style="white-space:nowrap;">↻ Refresh Open issues</button>
+      <select id="xyzElevationIssueSelect" style="flex:1;min-width:260px;padding:.5em .7em;
+              border:1px solid #d0d7de;border-radius:4px;background:#fff;font-size:.95em;">
+        <option value="">— refresh to load Open issues …</option>
+      </select>
+    </div>
+
+    <div style="display:flex;gap:.5em;flex-wrap:wrap;align-items:center;margin-bottom:.5em;">
+      <select id="xyzElevationSeveritySelect" style="min-width:150px;padding:.5em .7em;
+              border:1px solid #d0d7de;border-radius:4px;background:#fff;font-size:.95em;">
+        <option value="major">major</option>
+        <option value="critical">critical</option>
+        <option value="minor">minor</option>
+        <option value="feature">feature</option>
+      </select>
+      <select id="xyzElevationModeSelect" style="min-width:130px;padding:.5em .7em;
+              border:1px solid #d0d7de;border-radius:4px;background:#fff;font-size:.95em;">
+        <option value="direct-main">direct-main</option>
+        <option value="dry-run">dry-run</option>
+        <option value="pr">create PR</option>
+      </select>
+      <button id="xyzElevationApplyBtn" class="primary" style="white-space:nowrap;">✓ Apply priority change</button>
+    </div>
+
+    <textarea id="xyzElevationRationaleInput" placeholder="rationale"
+              style="width:100%;min-height:72px;box-sizing:border-box;padding:.55em .7em;
+                     border:1px solid #d0d7de;border-radius:4px;background:#fff;
+                     font-size:.95em;resize:vertical;margin-bottom:.6em;"></textarea>
+
+    <div id="xyzElevationOut" style="margin-top:.4em;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+         font-size:.85em;padding:10px 12px;background:#f6f8fa;border:1px solid #d0d7de;
+         border-radius:4px;min-height:1.4em;color:#444;white-space:pre-wrap;
+         max-height:520px;overflow-y:auto;">(no Open issue loaded yet)</div>
+
+    <div class="meta" style="margin-top:.6em;font-size:.8em;color:#666;">
+      Backed by <code>xyz_master_open_issues</code> and
+      <code>xyz_master_request_priority_change</code>. The request is converted
+      into a standard XYZ_MASTER severity-transition candidate and processed by
+      the background filing workflow.
+    </div>
+  </div>
+
+  <!-- XYZ-PILOT-250: Swarm Tester — schedule a run -->
+  <div class="card" id="swarmScheduleCard">
+    <h3 style="margin:0 0 .5em 0;font-size:1.05em;">🐝 Swarm Tester — schedule a run</h3>
+    <p style="margin:0 0 .8em 0;font-size:.9em;color:#444;">
+      Schedule a future E2E swarm run. XYZ_MASTER always participates — the checkboxes below
+      select the additional agents.
+    </p>
+
+    <!-- Date + time -->
+    <div style="display:flex;gap:.7em;flex-wrap:wrap;align-items:center;margin-bottom:.7em;">
+      <label style="font-size:.92em;">Date (CEST)
+        <input type="date" id="swarm-date"
+               style="margin-left:.4em;padding:.35em .5em;border:1px solid #d0d7de;border-radius:4px;">
+      </label>
+      <label style="font-size:.92em;">Time (CEST)
+        <input type="time" id="swarm-time" value="10:00"
+               style="margin-left:.4em;padding:.35em .5em;border:1px solid #d0d7de;border-radius:4px;">
+      </label>
+    </div>
+
+    <!-- Agent checkboxes -->
+    <fieldset style="border:1px solid #d0d7de;border-radius:6px;padding:.5em .8em .7em;margin-bottom:.7em;">
+      <legend style="font-size:.88em;color:#555;padding:0 .3em;">Agents</legend>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:.25em .5em;font-size:.91em;">
+        <label><input type="checkbox" id="agent-XYZ_EXPERT"         checked> XYZ_EXPERT</label>
+        <label><input type="checkbox" id="agent-XYZ_SMOKE"          checked> XYZ_SMOKE</label>
+        <label><input type="checkbox" id="agent-XYZ_INTEGRATION"    checked> XYZ_INTEGRATION</label>
+        <label><input type="checkbox" id="agent-XYZ_E2E"            checked> XYZ_E2E</label>
+        <label><input type="checkbox" id="agent-XYZ_UAT"            checked> XYZ_UAT</label>
+        <label><input type="checkbox" id="agent-XYZ_CHAOS"          checked> XYZ_CHAOS</label>
+        <label><input type="checkbox" id="agent-XYZ_STRESS"         checked> XYZ_STRESS</label>
+        <label><input type="checkbox" id="agent-XYZ_REGRESSION"     checked> XYZ_REGRESSION</label>
+        <label><input type="checkbox" id="agent-XYZ_INFRASTRUCTURE" checked> XYZ_INFRASTRUCTURE</label>
+      </div>
+      <div class="meta" style="margin-top:.4em;font-size:.82em;color:#666;">
+        XYZ_MASTER always runs — no checkbox needed.
+      </div>
+    </fieldset>
+
+    <!-- Numeric params -->
+    <div style="display:flex;gap:1em;flex-wrap:wrap;align-items:center;margin-bottom:.7em;font-size:.92em;">
+      <label>XYZ_STRESS_USERS
+        <input type="number" id="swarm-stress" value="10" min="1" max="50"
+               style="width:62px;margin-left:.4em;padding:.3em .4em;border:1px solid #d0d7de;border-radius:4px;">
+      </label>
+      <label>Session-hold (s)
+        <input type="number" id="swarm-hold" value="20" min="0"
+               style="width:68px;margin-left:.4em;padding:.3em .4em;border:1px solid #d0d7de;border-radius:4px;">
+      </label>
+    </div>
+
+    <!-- Flags -->
+    <div style="display:flex;gap:1.2em;flex-wrap:wrap;align-items:center;margin-bottom:.7em;font-size:.92em;">
+      <label><input type="checkbox" id="swarm-dry"> Dry run</label>
+      <label><input type="checkbox" id="swarm-force"> Force run</label>
+    </div>
+
+    <!-- Advanced overrides -->
+    <div style="margin-bottom:.7em;">
+      <label style="font-size:.92em;display:block;margin-bottom:.3em;">Advanced overrides
+        <span style="font-size:.85em;color:#777;">(XYZ_FOO=bar, one per line)</span>
+      </label>
+      <textarea id="swarm-advanced" placeholder="XYZ_FOO=bar one per line"
+                style="width:100%;min-height:60px;box-sizing:border-box;padding:.45em .6em;
+                       border:1px solid #d0d7de;border-radius:4px;background:#fff;
+                       font-size:.9em;resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;"></textarea>
+    </div>
+
+    <!-- Notification recipients -->
+    <fieldset style="border:1px solid #d0d7de;border-radius:6px;padding:.5em .8em .7em;margin-bottom:.8em;">
+      <legend style="font-size:.88em;color:#555;padding:0 .3em;">Publish results by email</legend>
+      <label style="font-size:.92em;display:block;margin-bottom:.35em;">
+        <input type="checkbox" id="swarm-notify" checked> Send results email
+      </label>
+      <div style="display:flex;gap:1.2em;flex-wrap:wrap;font-size:.91em;">
+        <label><input type="checkbox" id="recip-thomas" data-email="<OPERATOR_EMAIL>"   checked> <OPERATOR_NAME></label>
+        <label><input type="checkbox" id="recip-ops2" data-email="<OPS_USER_2_EMAIL>"    checked> <OPS_USER_2> B.</label>
+        <label><input type="checkbox" id="recip-bhagya" data-email="<OPS_USER_3_EMAIL>"  checked> <OPS_USER_3></label>
+      </div>
+    </fieldset>
+
+    <div style="display:flex;gap:.6em;align-items:center;margin-bottom:.8em;">
+      <button id="swarm-schedule-btn" class="primary">Schedule run</button>
+    </div>
+
+    <!-- Pending schedules list -->
+    <div id="swarm-schedules" style="font-size:.9em;color:#444;">Loading scheduled runs…</div>
+  </div>
+
+  <!-- XYZ-PILOT-250: Swarm Tester — pull & analyze a run -->
+  <div class="card" id="swarmAnalyzeCard">
+    <h3 style="margin:0 0 .5em 0;font-size:1.05em;">📊 Swarm Tester — pull &amp; analyze a run</h3>
+    <p style="margin:0 0 .8em 0;font-size:.9em;color:#444;">
+      Select a past swarm run from GitHub and load its per-agent results.
+    </p>
+
+    <div style="display:flex;gap:.6em;flex-wrap:wrap;align-items:center;margin-bottom:.8em;">
+      <select id="swarm-run"
+              style="flex:1;min-width:260px;padding:.5em .7em;border:1px solid #d0d7de;
+                     border-radius:4px;background:#fff;font-size:.95em;">
+        <option value="">Loading runs…</option>
+      </select>
+      <button id="swarm-load-btn">Load &amp; analyze</button>
+    </div>
+
+    <div id="swarm-results"></div>
+  </div>
+</div>
+
+<script src="https://sdk.amazonaws.com/js/aws-sdk-2.1488.0.min.js"></script>
+<script>
+"use strict";
+
+const CONFIG = {
+  region:         "<AWS_REGION>",
+  cognitoDomain:  "https://<COGNITO_DOMAIN_PREFIX>.auth.<AWS_REGION>.amazoncognito.com",
+  clientId:       "1m8ev3jgrcuvnerd15brmv0rdm",   // xyz-pilot-dashboard-client (no secret, PKCE)
+  identityPoolId: "<AWS_REGION>:1face40a-f12d-4f64-b4e0-ba022f1f382d",
+  userPoolId:     "<COGNITO_USER_POOL_ID>",
+  redirectUri:    window.location.origin + window.location.pathname,
+  instanceId:     "<EC2_INSTANCE_ID>",
+  startLambda:    "xyz-pilot-start",
+  stopLambda:     "xyz-pilot-stop",
+  secretLambda:   "xyz-pilot-get-secret",       // XYZ-PILOT-081
+  userMgmtLambda: "xyz-pilot-user-mgmt",        // XYZ-PILOT-116
+  pollMs:         10000,
+  serviceProbeMs: 60000,                        // XYZ-PILOT-078
+  licenseEvidenceMs: 60000,                     // XYZ-PILOT-289
+  refreshMarginSec: 120,                         // XYZ-PILOT-118 dashboard-only
+  refreshLoopMs:   50 * 60 * 1000,
+};
+
+// XYZ-PILOT-150 provenance discipline: every dashboard.html re-deploy MUST
+// update the 3 const fields below (lastDeploymentIssue, trackerUrl,
+// builtAtUtc) BEFORE the `aws s3 cp` to the operator dashboard bucket.
+// The 4th field (deployedAt, rendered by renderDeploymentMeta()) reads
+// the S3 object's Last-Modified header automatically — no manual update.
+// The 5th field (dashboardSessionStartedAtUtc) is set at page-load via
+// new Date() — also no manual update.
+//
+// XYZ-PILOT-188 (2026-06-01) — exasolDbVersion now stamped here too.
+// Update it whenever the live Exasol Personal runtime is upgraded
+// (i.e. when you re-run `exasol install aws` against a newer launcher).
+// Authoritative source: `exasol-deployment/deployment.log` line
+// "exasol version: <X.Y.Z>" or `exasol presets export ubuntu
+// --type installation` → `installation.yaml` `default:`. Stay in
+// sync — the dashboard becomes the easy-glance source-of-truth for
+// non-operator subscribers asking "what Exasol version are we on?".
+//
+// Last refreshed by OpenAI Codex 2026-06-07 — XYZ-PILOT-219
+// (XYZ_MASTER approval backlog now suppresses housekeeping/burst noise).
+// Previous refresh was XYZ-PILOT-295 (XYZ_STRESS widget cap).
+const BUILD_INFO = {
+  lastDeploymentIssue: "XYZ-PILOT-283",
+  trackerUrl: "https://github.com/<GITHUB_OWNER>/<PROJECT_SLUG>/blob/main/docs/XYZ_PILOT_ISSUE_TRACKER.md#XYZ-PILOT-283",
+  builtAtUtc: "2026-06-26T07:30:12Z",
+  exasolDbVersion: "2025.2.0",
+  exasolLauncherVersion: "1.4.0",
+  dashboardSessionStartedAtUtc: new Date().toISOString(),
+};
+
+// Friendly labels for the password-retrieval dropdown (XYZ-PILOT-081).
+// Lambda's authoritative list comes from its SECRETS dict; we populate
+// the <select> from the Lambda's `available_secrets` response, so
+// this map is just for display strings.
+const SECRET_LABELS = {
+  "exasol-sys":              "Exasol DB · sys (superuser)",
+  "exasol-xyz-dash":         "Exasol DB · XYZ_DASH (read-only, <PILOT_SCHEMA>)",
+  "exasol-xyz-biz":          "Exasol DB · XYZ_BIZ (read-only, external semantic layer business views)",
+  "exasol-xyz-ops":          "Exasol DB · XYZ_OPS (admin role, non-SYS)",
+  "exasol-admin-ui":         "Exasol Personal · Admin UI (port 8443)",
+  "exasol-exaconf-monitor":  "Exasol Personal · EXAConf monitoring user (Rapid health)",
+  "exasol-fingerprint":      "Exasol DB · TLS fingerprint (DBVisualizer · JDBC validateservercertificate=1 · pyexasol fingerprint=)",
+  "grafana-admin":           "Grafana · web admin",
+  "streamlit-app-password":  "Streamlit QBR · APP_PASSWORD",
+  "exasol-proxy-token":      "Exasol Proxy · bearer token",
+  "github-pat":              "GitHub · chatbot PAT",
+};
+
+const ALL_INVITE_GROUPS = ["OPS_ONLY", "XYZ_PILOT", "XYZ_OPS", "XYZ_BIZ"];
+const INVITE_GROUP_INPUTS = {
+  OPS_ONLY: "inviteGroupOpsOnly",
+  XYZ_PILOT: "inviteGroupPilot",
+  XYZ_OPS: "inviteGroupHpcOps",
+  XYZ_BIZ: "inviteGroupHpcBiz",
+};
+let CURRENT_ACCESS = null;
+
+const DASHBOARD_BASE_TITLE = "<PILOT_NAME> — Operator Dashboard";
+const GROUP_PRESENTATION = {
+  OPS_ONLY:  "<PILOT_NAME> OPS (=OPS_ONLY)",
+  XYZ_PILOT: "<PILOT_NAME> User (=XYZ_PILOT)",
+  XYZ_OPS:   "XYZ_OPS (=XYZ_OPS)",
+  XYZ_BIZ:   "XYZ_BIZ (=XYZ_BIZ)",
+};
+const GROUP_PRECEDENCE = ["OPS_ONLY", "XYZ_OPS", "XYZ_PILOT", "XYZ_BIZ"];
+
+function resolvePrimaryGroup(ctx) {
+  const set = new Set(Array.isArray(ctx && ctx.groups) ? ctx.groups : []);
+  for (const group of GROUP_PRECEDENCE) {
+    if (set.has(group)) return group;
+  }
+  // Fallback inference for allowlisted/elevated operators where Cognito group
+  // lookup can be empty but context still carries effective role capabilities.
+  if (ctx && ctx.full_operator) return "OPS_ONLY";
+  const allowed = new Set(Array.isArray(ctx && ctx.allowed_invite_groups) ? ctx.allowed_invite_groups : []);
+  if (allowed.has("XYZ_OPS") && allowed.has("XYZ_BIZ") && allowed.size === 2) return "XYZ_OPS";
+  if (ctx && ctx.dashboard_access) return "XYZ_PILOT";
+  return null;
+}
+
+function renderDashboardTitle(ctx) {
+  const primary = resolvePrimaryGroup(ctx || {});
+  const roleSuffix = primary ? ` - ${GROUP_PRESENTATION[primary] || primary}` : "";
+  const userSuffix = ctx && ctx.email ? ` / User : ${ctx.email}` : "";
+  const title = `${DASHBOARD_BASE_TITLE}${roleSuffix}${userSuffix}`;
+  const header = document.getElementById("dashboardTitle");
+  if (header) header.textContent = title;
+  document.title = title;
+}
+
+function accessPayload(payload = {}) {
+  return {
+    ...payload,
+    headers: {
+      ...(payload.headers || {}),
+      authorization: "Bearer " + sessionStorage.getItem("access_token"),
+    },
+  };
+}
+
+function showOrHide(id, visible) {
+  const el = document.getElementById(id);
+  if (el) el.style.display = visible ? "" : "none";
+}
+
+function configureInviteGroupControls(ctx) {
+  const allowed = new Set((ctx && ctx.allowed_invite_groups) || []);
+  const defaults = new Set((ctx && ctx.default_invite_groups) || ["XYZ_BIZ"]);
+  const canInvite = !!(ctx && ctx.can_invite);
+  let defaultApplied = false;
+  for (const group of ALL_INVITE_GROUPS) {
+    const input = document.getElementById(INVITE_GROUP_INPUTS[group]);
+    if (!input) continue;
+    const enabled = canInvite && allowed.has(group);
+    input.checked = enabled && defaults.has(group) && !defaultApplied;
+    if (input.checked) defaultApplied = true;
+    input.disabled = !enabled;
+    if (input.parentElement) input.parentElement.classList.toggle("disabled", !enabled);
+  }
+  if (canInvite && !defaultApplied) {
+    const firstAllowed = ALL_INVITE_GROUPS.find(group => allowed.has(group));
+    const input = firstAllowed ? document.getElementById(INVITE_GROUP_INPUTS[firstAllowed]) : null;
+    if (input) input.checked = true;
+  }
+  const inviteBtn = document.getElementById("onboardInviteBtn");
+  if (inviteBtn) inviteBtn.disabled = !canInvite;
+  const hint = document.getElementById("onboardGroupHint");
+  if (hint) {
+    if (!ctx || !ctx.dashboard_access) {
+      hint.textContent = "Current user is not authorized for Operator Dashboard onboarding.";
+    } else if (ctx.full_operator) {
+      hint.textContent = "OPS_ONLY mode: all Cognito groups may be assigned. XYZ_BIZ is selected by default.";
+    } else if ((ctx.groups || []).includes("XYZ_OPS")) {
+      hint.textContent = "XYZ_OPS mode: only XYZ_OPS and XYZ_BIZ may be assigned. XYZ_BIZ is selected by default.";
+    } else {
+      hint.textContent = "Read-only onboarding: this user may inspect status but cannot invite new users.";
+    }
+  }
+}
+
+function selectedInviteGroups() {
+  const selected = document.querySelector('input[name="inviteTargetGroup"]:checked:not(:disabled)');
+  return selected ? [selected.value] : [];
+}
+
+function applyDashboardAccess(ctx) {
+  CURRENT_ACCESS = ctx || {};
+  const full = !!CURRENT_ACCESS.full_operator;
+  const primary = resolvePrimaryGroup(CURRENT_ACCESS);
+  const visible = CURRENT_ACCESS.visible_panels || {};
+  const secretVisible = visible.service_password_retrieval !== false;
+  renderDashboardTitle(CURRENT_ACCESS);
+  showOrHide("githubCommitCard", full);
+  showOrHide("xyzMasterCard", full);
+  showOrHide("xyzElevationCard", full);
+  showOrHide("swarmScheduleCard", full);
+  showOrHide("swarmAnalyzeCard", full);
+  showOrHide("secretCard", secretVisible);
+  configureInviteGroupControls(CURRENT_ACCESS);
+  const groups = (CURRENT_ACCESS.groups || []).join(", ") || "no Cognito group";
+  const effective = primary ? (GROUP_PRESENTATION[primary] || primary) : "unresolved";
+  log(`Operator role context · ${CURRENT_ACCESS.email || "unknown"} · ${groups} · effective=${effective} · ${full ? "full operator" : "limited dashboard"}`, "ok");
+}
+
+// ─── PKCE helpers ─────────────────────────────────────────────────────────
+function b64url(buf) {
+  return btoa(String.fromCharCode(...new Uint8Array(buf)))
+    .replace(/=/g,"").replace(/\+/g,"-").replace(/\//g,"_");
+}
+async function pkce() {
+  const verifier  = b64url(crypto.getRandomValues(new Uint8Array(32)));
+  const challenge = b64url(await crypto.subtle.digest("SHA-256",
+                              new TextEncoder().encode(verifier)));
+  return { verifier, challenge };
+}
+
+function _localGet(key) {
+  try { return localStorage.getItem(key); } catch (_) { return null; }
+}
+
+function _localSet(key, value) {
+  try { localStorage.setItem(key, value); } catch (_) {}
+}
+
+function _localRemove(key) {
+  try { localStorage.removeItem(key); } catch (_) {}
+}
+
+function setOAuthHandshake(key, value) {
+  sessionStorage.setItem(key, value);
+  _localSet(key, value);
+}
+
+function getOAuthHandshake(key) {
+  return sessionStorage.getItem(key) || _localGet(key);
+}
+
+function clearOAuthHandshake() {
+  sessionStorage.removeItem("pkce_verifier");
+  sessionStorage.removeItem("oauth_state");
+  _localRemove("pkce_verifier");
+  _localRemove("oauth_state");
+}
+
+// ─── OAuth code flow against the Cognito Hosted UI ─────────────────────────
+async function startOAuth() {
+  const { verifier, challenge } = await pkce();
+  setOAuthHandshake("pkce_verifier", verifier);
+  const state = b64url(crypto.getRandomValues(new Uint8Array(16)));
+  setOAuthHandshake("oauth_state", state);
+  const url = new URL(CONFIG.cognitoDomain + "/oauth2/authorize");
+  url.searchParams.set("response_type",        "code");
+  url.searchParams.set("client_id",            CONFIG.clientId);
+  url.searchParams.set("redirect_uri",         CONFIG.redirectUri);
+  url.searchParams.set("scope",                "openid email profile aws.cognito.signin.user.admin");
+  url.searchParams.set("state",                state);
+  url.searchParams.set("code_challenge",       challenge);
+  url.searchParams.set("code_challenge_method","S256");
+  window.location = url.toString();
+}
+
+async function exchangeCode(code) {
+  const verifier = getOAuthHandshake("pkce_verifier");
+  if (!verifier) throw new Error("PKCE verifier missing from OAuth handshake storage");
+  const body = new URLSearchParams({
+    grant_type:    "authorization_code",
+    client_id:     CONFIG.clientId,
+    code:          code,
+    redirect_uri:  CONFIG.redirectUri,
+    code_verifier: verifier,
+  });
+  const r = await fetch(CONFIG.cognitoDomain + "/oauth2/token", {
+    method:  "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body,
+  });
+  if (!r.ok) throw new Error("Token exchange HTTP " + r.status + ": " + await r.text());
+  return r.json();
+}
+
+async function userInfo(accessToken) {
+  const r = await fetch(CONFIG.cognitoDomain + "/oauth2/userInfo", {
+    headers: { "Authorization": "Bearer " + accessToken },
+  });
+  if (!r.ok) return null;
+  return r.json();
+}
+
+// Decode the JWT payload (no signature verification — that's done by the
+// Identity Pool on exchange) so we can pre-check `exp` against the wall
+// clock before using a cached token. Avoids the "Token expired" round-trip
+// after a session has aged out.
+function tokenIsLive(jwt) {
+  return tokenSecondsRemaining(jwt) > 30;
+}
+
+function tokenSecondsRemaining(jwt) {
+  if (!jwt) return 0;
+  try {
+    const parts = jwt.split(".");
+    if (parts.length !== 3) return 0;
+    const payload = JSON.parse(
+      atob(parts[1].replace(/-/g, "+").replace(/_/g, "/"))
+    );
+    const nowSec = Date.now() / 1000;
+    return payload.exp ? Math.floor(payload.exp - nowSec) : 0;
+  } catch (_) {
+    return 0;
+  }
+}
+
+function clearCachedTokens() {
+  sessionStorage.removeItem("id_token");
+  sessionStorage.removeItem("access_token");
+  sessionStorage.removeItem("refresh_token");
+  clearOAuthHandshake();
+}
+
+function showTopAuthBar(visible) {
+  const bar = document.getElementById("topAuthBar");
+  if (bar) bar.style.display = visible ? "" : "none";
+}
+
+function stopRefreshLoop() {
+  if (_refreshLoop) {
+    clearInterval(_refreshLoop);
+    _refreshLoop = null;
+  }
+}
+
+function logoutCognito() {
+  stopRefreshLoop();
+  clearCachedTokens();
+  showTopAuthBar(false);
+  const url = new URL(CONFIG.cognitoDomain + "/logout");
+  url.searchParams.set("client_id", CONFIG.clientId);
+  url.searchParams.set("logout_uri", CONFIG.redirectUri);
+  window.location = url.toString();
+}
+
+function formatUtc(value) {
+  if (!value || value === "unknown" || value === "not-stamped") return "not stamped";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  return d.toISOString().replace(".000Z", "Z");
+}
+
+function renderDeploymentMeta() {
+  const el = document.getElementById("deployment-meta");
+  if (!el) return;
+  const lastModified = new Date(document.lastModified);
+  const deployedAt = Number.isNaN(lastModified.getTime())
+    ? "S3 Last-Modified unavailable"
+    : formatUtc(lastModified.toISOString());
+  el.innerHTML =
+    `<a href="${BUILD_INFO.trackerUrl}" target="_blank" rel="noopener">${BUILD_INFO.lastDeploymentIssue}</a>` +
+    ` · build ${formatUtc(BUILD_INFO.builtAtUtc)}` +
+    ` · deployed ${deployedAt}` +
+    ` · dashboard session started ${formatUtc(BUILD_INFO.dashboardSessionStartedAtUtc)}`;
+}
+
+function storeTokens(tokens) {
+  if (tokens.id_token) sessionStorage.setItem("id_token", tokens.id_token);
+  if (tokens.access_token) sessionStorage.setItem("access_token", tokens.access_token);
+  // Cognito returns refresh_token on authorization-code exchange, but usually
+  // not on refresh-token exchange. Preserve the existing one in that case.
+  if (tokens.refresh_token) sessionStorage.setItem("refresh_token", tokens.refresh_token);
+}
+
+async function refreshTokens(reason) {
+  const refreshToken = sessionStorage.getItem("refresh_token");
+  if (!refreshToken) throw new Error("No refresh token cached");
+  const body = new URLSearchParams({
+    grant_type:    "refresh_token",
+    client_id:     CONFIG.clientId,
+    refresh_token: refreshToken,
+  });
+  const r = await fetch(CONFIG.cognitoDomain + "/oauth2/token", {
+    method:  "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body,
+  });
+  if (!r.ok) throw new Error("Token refresh HTTP " + r.status + ": " + await r.text());
+  const tokens = await r.json();
+  storeTokens(tokens);
+  if (tokens.id_token) await configureAws(tokens.id_token);
+  const user = tokens.access_token ? await userInfo(tokens.access_token).catch(() => null) : null;
+  if (user && user.email) document.getElementById("user").textContent = user.email;
+  log("✓ Cognito session refreshed" + (reason ? " · " + reason : ""), "ok");
+  return {
+    idToken: sessionStorage.getItem("id_token"),
+    accessToken: sessionStorage.getItem("access_token"),
+  };
+}
+
+async function ensureFreshTokens(reason, minTtlSec = CONFIG.refreshMarginSec) {
+  const idToken = sessionStorage.getItem("id_token");
+  const accessToken = sessionStorage.getItem("access_token");
+  if (tokenSecondsRemaining(idToken) > minTtlSec &&
+      tokenSecondsRemaining(accessToken) > minTtlSec) {
+    return { idToken, accessToken };
+  }
+  return refreshTokens(reason || "token near expiry");
+}
+
+let _refreshLoop = null;
+function startRefreshLoop() {
+  if (_refreshLoop) return;
+  _refreshLoop = setInterval(() => {
+    ensureFreshTokens("background refresh", CONFIG.refreshMarginSec)
+      .catch(e => {
+        log("Cognito background refresh failed: " + e.message, "err");
+      });
+  }, CONFIG.refreshLoopMs);
+}
+
+// ─── Identity Pool → temp AWS credentials ──────────────────────────────────
+// Module-scoped credentials object — every SDK client passes this explicitly
+// instead of relying on AWS.config (some SDK builds don't auto-pick it up,
+// resulting in "Missing credentials in config" even after a successful
+// Cognito Identity exchange).
+let _creds = null;
+
+async function configureAws(idToken) {
+  const provider = "cognito-idp." + CONFIG.region + ".amazonaws.com/" + CONFIG.userPoolId;
+  AWS.config.update({ region: CONFIG.region });
+  const c = new AWS.CognitoIdentityCredentials({
+    IdentityPoolId: CONFIG.identityPoolId,
+    Logins: { [provider]: idToken },
+  });
+  try {
+    await new Promise((resolve, reject) => {
+      c.refresh(err => err ? reject(err) : resolve());
+    });
+  } catch (err) {
+    // Switching users (or legacy cached identity IDs) can leave the browser
+    // with a stale Cognito Identity cache that no longer matches current Logins.
+    // Clear and retry once before surfacing an error.
+    const msg = String((err && err.message) || err || "");
+    if (/Logins don't match|not authorized|Invalid login token/i.test(msg)) {
+      c.clearCachedId();
+      await new Promise((resolve, reject) => {
+        c.refresh(e2 => e2 ? reject(e2) : resolve());
+      });
+    } else {
+      throw err;
+    }
+  }
+  if (!c.accessKeyId) {
+    throw new Error("Cognito Identity returned empty credentials. " +
+                    "Check Identity Pool trust policy + that the access " +
+                    "token carries the aws.cognito.signin.user.admin scope.");
+  }
+  _creds = c;
+  AWS.config.credentials = c;  // belt + braces — also populate global
+  log("AWS credentials acquired · access key " + c.accessKeyId.slice(0, 4) + "…");
+}
+
+// ─── EC2 + Lambda calls via SDK ────────────────────────────────────────────
+// All clients receive `credentials` + `region` explicitly so a stale
+// AWS.config can't silently break us, and so future-us doesn't have to
+// debug "Missing credentials in config" again.
+// XYZ-PILOT-113: Identity Pool STS credentials have their own 1 h TTL,
+// independent of the Cognito id_token TTL (which can be longer). When the
+// STS creds expire while id_token is still fresh, `ensureFreshTokens()`
+// short-circuits and the SDK falls into a 10-second-loop of "Missing
+// credentials in config". Rebuild `_creds` from the fresh id_token so the
+// caller never hands an expired CognitoIdentityCredentials object to the SDK.
+async function ensureFreshAwsCreds(reason) {
+  const tokens = await ensureFreshTokens(reason);
+  if (!_creds || _creds.expired || (typeof _creds.needsRefresh === "function" && _creds.needsRefresh())) {
+    await configureAws(tokens.idToken);
+  }
+  return tokens;
+}
+
+async function describeEc2() {
+  await ensureFreshAwsCreds("DescribeInstances");
+  if (!_creds) throw new Error("EC2 call before credentials acquired");
+  const ec2 = new AWS.EC2({ credentials: _creds, region: CONFIG.region });
+  const resp = await ec2.describeInstances({ InstanceIds: [CONFIG.instanceId] }).promise();
+  return resp.Reservations[0].Instances[0].State.Name;
+}
+
+async function invoke(name, payload = {}) {
+  const tokens = await ensureFreshAwsCreds("Lambda invoke " + name);
+  if (payload && payload.headers &&
+      typeof payload.headers.authorization === "string" &&
+      payload.headers.authorization.startsWith("Bearer ")) {
+    payload = {
+      ...payload,
+      headers: {
+        ...payload.headers,
+        authorization: "Bearer " + tokens.accessToken,
+      },
+    };
+  }
+  if (!_creds) throw new Error("Lambda call before credentials acquired");
+  const lam = new AWS.Lambda({ credentials: _creds, region: CONFIG.region });
+  const r = await lam.invoke({
+    FunctionName:   name,
+    InvocationType: "RequestResponse",
+    Payload:        JSON.stringify(payload),
+  }).promise();
+  // AWS SDK v2 in browser returns r.Payload in different shapes across
+  // versions/builds: a Uint8Array (typed array), an ArrayBuffer, a Blob,
+  // a plain string (already UTF-8 decoded), or even an already-parsed
+  // JS object. The original `new TextDecoder().decode(r.Payload)` only
+  // handles the typed-array/ArrayBuffer cases — every other shape blows
+  // up with "parameter 1 is not of type 'ArrayBuffer'". Handle all five.
+  const p = r.Payload;
+  let text;
+  if (typeof p === "string") {
+    text = p;
+  } else if (p instanceof Uint8Array || p instanceof ArrayBuffer || ArrayBuffer.isView(p)) {
+    text = new TextDecoder().decode(p);
+  } else if (p && typeof p.text === "function") {
+    text = await p.text();   // Blob
+  } else if (p && typeof p === "object") {
+    return p;                // already-parsed object
+  } else {
+    text = String(p ?? "");
+  }
+  try { return JSON.parse(text); } catch { return text; }
+}
+
+// ─── UI helpers ───────────────────────────────────────────────────────────
+// XYZ-PILOT-290 — operator-resizable log panel: restore the saved height,
+// persist on resize, and an Expand/Collapse toggle for one-click full-size.
+const LOG_HEIGHT_KEY = "xyzLogHeightPx";
+function initLogPanel() {
+  const lg = document.getElementById("log");
+  if (!lg) return;
+  const saved = parseInt(_localGet(LOG_HEIGHT_KEY) || "", 10);
+  if (saved && saved >= 120) lg.style.height = saved + "px";
+  // Persist the height whenever the operator drags the resize handle.
+  if (typeof ResizeObserver === "function") {
+    let t = null;
+    new ResizeObserver(() => {
+      clearTimeout(t);
+      t = setTimeout(() => _localSet(LOG_HEIGHT_KEY, String(lg.offsetHeight)), 250);
+    }).observe(lg);
+  }
+  const btn = document.getElementById("logExpandBtn");
+  if (btn) btn.onclick = () => {
+    const full = Math.max(320, Math.round(window.innerHeight * 0.8));
+    const expanded = lg.offsetHeight >= full - 8;
+    const next = expanded ? 280 : full;
+    lg.style.height = next + "px";
+    _localSet(LOG_HEIGHT_KEY, String(next));
+    btn.textContent = expanded ? "⤢ Expand" : "⤡ Collapse";
+    lg.scrollTop = lg.scrollHeight;
+  };
+}
+function log(msg, cls) {
+  const div = document.createElement("div");
+  div.className = cls || "";
+  div.textContent = "[" + new Date().toLocaleTimeString() + "] " + msg;
+  const lg = document.getElementById("log");
+  lg.appendChild(div);
+  lg.scrollTop = lg.scrollHeight;
+}
+
+// Service inventory — kept here (not fetched) because every URL is a stable
+// named cloudflared tunnel or a fixed EC2 hostname behind the Elastic IP.
+// `gatedBy` controls how Availability is computed from EC2 state:
+//   "ec2"     → RUNNING iff EC2 is running, STOPPED otherwise
+//   "always"  → always reachable (S3-hosted, independent of EC2)
+const SERVICES = [
+  { name: `Exasol DB <span style="background:#003366;color:white;font-size:.72em;padding:1px 6px;border-radius:3px;font-weight:600;margin-left:4px;vertical-align:middle;">v${BUILD_INFO.exasolDbVersion}</span>`,
+    url:  "<EXASOL_HOSTNAME>:8563",
+    gatedBy: "ec2", hint: `pyexasol / JDBC / ODBC, TLS required · runtime v${BUILD_INFO.exasolDbVersion} (launcher v${BUILD_INFO.exasolLauncherVersion})` },
+  { name: `Exasol Admin UI <span style="background:#003366;color:white;font-size:.72em;padding:1px 6px;border-radius:3px;font-weight:600;margin-left:4px;vertical-align:middle;">v${BUILD_INFO.exasolDbVersion}</span>`,
+    url:  "https://<PROJECT_SLUG>-admin.<PILOT_DOMAIN>/databases",
+    gatedBy: "ec2", hint: "self-signed cert — browser warning expected" },
+  { name: "SSH",
+    url:  "ssh ubuntu@<EXASOL_HOSTNAME>",
+    gatedBy: "ec2", hint: "key-only auth (XYZ-PILOT-024 EIP)" },
+  { name: "Streamlit QBR",
+    url:  "https://<PROJECT_SLUG>-qbr.<PILOT_DOMAIN>",
+    gatedBy: "ec2", probeId: "qbr", hint: "auth via XYZ_REQUIRE_AUTH gate (XYZ-PILOT-070)" },
+  { name: "Grafana",
+    url:  "https://<PROJECT_SLUG>.<PILOT_DOMAIN>/mcp",
+    gatedBy: "ec2", probeId: "grafana", hint: "XYZ_DASH read-only DB user via exasol_proxy" },
+  { name: "Exasol MCP API (OAuth-gated)",
+    url:  "https://<PROJECT_SLUG>.<PILOT_DOMAIN>/mcp",
+    gatedBy: "ec2", probeId: "mcp", linkMode: "api",
+    hint: "API endpoint (not a browser UI) · unauthenticated 401/403 is healthy · use an MCP client with OAuth" },
+  { name: "<PILOT_NAME> Chatbot",
+    url:  "https://<PROJECT_SLUG>-chat.<PILOT_DOMAIN>",
+    gatedBy: "ec2", probeId: "chatbot", hint: "Cognito SSO · Bedrock Claude Sonnet 4.6 + MCP tools" },
+  { name: "<PILOT_NAME> Operator Dashboard",
+    url:  "https://<PROJECT_SLUG>-dashboard.<PILOT_DOMAIN>",
+    gatedBy: "always", hint: "you are here · CloudFront HTTPS over private S3 origin, Cognito-gated" },
+];
+
+function _badge(text, color) {
+  return `<span class="badge" style="display:inline-block;padding:2px 8px;`
+       + `border-radius:3px;font-size:.85em;color:#fff;background:${color};">${text}</span>`;
+}
+
+let _serviceProbeState = {};
+let _lastServiceProbeAt = 0;
+
+function _availabilityFromEc2(service, ec2State) {
+  const isUp = (ec2State === "running");
+  const isPartial = (ec2State === "pending" || ec2State === "stopping");
+  if (service.gatedBy === "always") return _badge("RUNNING", "#1AAB40");
+  if (isUp) return _badge("RUNNING", "#1AAB40");
+  if (isPartial) return _badge(ec2State.toUpperCase(), "#D4A017");
+  return _badge("STOPPED", "#888");
+}
+
+function _availabilityFromProbe(service, ec2State) {
+  if (ec2State !== "running" || !service.probeId) return _availabilityFromEc2(service, ec2State);
+  const probe = _serviceProbeState[service.probeId];
+  if (!probe) {
+    return _badge("PROBING", "#57606a")
+         + `<div style="color:#666;font-size:.78em;margin-top:3px;">server-side check pending</div>`;
+  }
+  const badge = probe.ok ? _badge("LIVE", "#1AAB40") : _badge("DOWN", "#C0392B");
+  const checked = probe.checked_at_utc ? formatUtc(probe.checked_at_utc).replace("T", " ") : "unknown";
+  const code = probe.code ? `HTTP ${probe.code}` : "no HTTP code";
+  const latency = Number.isFinite(probe.latency_ms) ? `${probe.latency_ms} ms` : "latency n/a";
+  const note = escapeHtml(probe.note || code);
+  return badge
+       + `<div style="color:#666;font-size:.78em;margin-top:3px;">${code} · ${latency}</div>`
+       + `<div style="color:#888;font-size:.74em;">${note} · ${checked}</div>`;
+}
+
+function _serviceLink(url) {
+  if (url.endsWith("/mcp")) {
+    const guide = "https://github.com/<GITHUB_OWNER>/<PROJECT_SLUG>/blob/main/docs/30-runbooks/mcp/XYZ_PILOT_MCP_CLIENT_GUIDE.md";
+    return `<code style="font-size:.95em;">${url}</code><br>`
+         + `<a href="${guide}" target="_blank" rel="noopener" style="color:#118DFF;text-decoration:none;">MCP Client Guide</a>`;
+  }
+  if (url.startsWith("http")) {
+    return `<a href="${url}" target="_blank" rel="noopener" style="color:#118DFF;text-decoration:none;">${url}</a>`;
+  }
+  return `<code style="font-size:.95em;">${url}</code>`;
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function renderServiceTable(ec2State) {
+  const tbody = document.getElementById("services-body");
+  if (!tbody) return;
+  tbody.innerHTML = SERVICES.map(s => {
+    const availability = _availabilityFromProbe(s, ec2State);
+    return `<tr style="border-bottom:1px solid #eaeaea;">`
+         + `<td style="padding:6px 8px;"><b>${s.name}</b><br>`
+         + `  <span style="color:#888;font-size:.8em;">${s.hint}</span></td>`
+         + `<td style="padding:6px 8px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.85em;word-break:break-all;">${_serviceLink(s.url)}</td>`
+         + `<td style="padding:6px 8px;">${availability}</td></tr>`;
+  }).join("");
+}
+
+function setState(state) {
+  const emoji = { running:"🟢", pending:"🟡", stopping:"🟡", stopped:"🔴" }[state] || "⚪";
+  document.getElementById("state").innerHTML = emoji + " <b>" + state + "</b>";
+  document.getElementById("startBtn").disabled = ["running","pending"].includes(state);
+  document.getElementById("stopBtn").disabled  = ["stopped","stopping"].includes(state);
+  if (state !== "running") _serviceProbeState = {};
+  renderServiceTable(state);
+  const lu = document.getElementById("last-updated");
+  if (lu) {
+    const now = new Date();
+    lu.textContent = "Last update " + now.toLocaleTimeString() + " (browser local)";
+  }
+}
+
+async function loadServiceProbes(force = false) {
+  const now = Date.now();
+  if (!force && _lastServiceProbeAt && now - _lastServiceProbeAt < CONFIG.serviceProbeMs) return;
+  _lastServiceProbeAt = now;
+  try {
+    const r = await invoke(CONFIG.userMgmtLambda, accessPayload({ action: "service_probe", timeout_seconds: 5 }));
+    if (!r.ok) throw new Error(r.error || "service_probe failed");
+    _serviceProbeState = {};
+    const probes = r.probes || [];
+    for (const probe of probes) {
+      _serviceProbeState[probe.id] = probe;
+    }
+    renderServiceTable("running");
+    const failed = probes.filter(p => !p.ok);
+    log(`✓ service probes refreshed · ${probes.length - failed.length}/${probes.length} live`, failed.length ? "err" : "ok");
+  } catch (e) {
+    log("✗ service_probe failed: " + e.message, "err");
+  }
+}
+
+// XYZ-PILOT-291 Option B: stream warm-up progress (published to S3 by the EC2
+// warm-up, served by the user-mgmt `warmup_progress` action) into the operator
+// log. Polled from refresh(); dedups so only state changes are logged. Fully
+// best-effort — any failure is silently ignored. Resets when the env stops so
+// the next start re-streams its cold warm-up.
+let _warmupLastSig = null;
+let _warmupDoneShown = false;
+async function pollWarmupProgress(ec2State) {
+  if (ec2State !== "running" && ec2State !== "pending") {
+    _warmupLastSig = null; _warmupDoneShown = false; return;
+  }
+  if (_warmupDoneShown) return;
+  let r;
+  try { r = await invoke(CONFIG.userMgmtLambda, accessPayload({ action: "warmup_progress" })); }
+  catch (e) { return; }
+  if (!r || !r.ok || !r.available || !r.progress) return;
+  const p = r.progress;
+  const sig = [p.state, p.done, p.total, p.message].join("|");
+  if (sig === _warmupLastSig) return;
+  _warmupLastSig = sig;
+  const cls = p.state === "failed" ? "err" : (p.state === "done" ? "ok" : "");
+  const cnt = (p.done != null && p.total != null) ? ` ${p.done}/${p.total}` : "";
+  const el  = (p.elapsed_s != null) ? ` · ${p.elapsed_s}s` : "";
+  log(`Warm-up [${p.state}]${cnt} · ${p.message || ""}${el}`, cls);
+  if (p.state === "done" || p.state === "failed") _warmupDoneShown = true;
+}
+
+// XYZ-PILOT-289: license rotation/export scripts publish non-secret evidence to
+// S3 after an apply. Stream the latest evidence into the Operator Dashboard log
+// so rotations are visible alongside warm-up and service probes.
+let _licenseEvidenceSig = null;
+let _lastLicenseEvidenceAt = 0;
+async function pollLicenseEvidence(force = false) {
+  const now = Date.now();
+  if (!force && _lastLicenseEvidenceAt && now - _lastLicenseEvidenceAt < CONFIG.licenseEvidenceMs) return;
+  _lastLicenseEvidenceAt = now;
+  let r;
+  try { r = await invoke(CONFIG.userMgmtLambda, accessPayload({ action: "license_evidence" })); }
+  catch (e) { log("✗ license_evidence failed: " + e.message, "err"); return; }
+  if (!r || !r.ok || !r.available || !r.evidence) return;
+  const ev = r.evidence || {};
+  const sig = [
+    ev.published_at_utc, ev.operation, ev.license_id, ev.company_name,
+    ev.expiration_date, ev.max_session_limit, ev.license_run_check, ev.db_state,
+    ev.replacement_license_sha256,
+  ].join("|");
+  if (sig === _licenseEvidenceSig) return;
+  _licenseEvidenceSig = sig;
+  const cls = String(ev.license_run_check || "").toUpperCase() === "OK" ? "ok" : "";
+  const parts = [
+    ev.operation || "license evidence",
+    ev.license_id ? `id=${ev.license_id}` : "",
+    ev.company_name || "",
+    ev.expiration_date ? `expires=${ev.expiration_date}` : "",
+    ev.max_session_limit ? `sessions=${ev.max_session_limit}` : "",
+    ev.license_run_check ? `run_check=${ev.license_run_check}` : "",
+    ev.db_state ? `db=${ev.db_state}` : "",
+    ev.replacement_license_sha256 ? `sha=${String(ev.replacement_license_sha256).slice(0, 12)}…` : "",
+    ev.published_at_utc ? `published=${formatUtc(ev.published_at_utc)}` : "",
+  ].filter(Boolean);
+  log("License evidence · " + parts.join(" · "), cls);
+}
+
+async function refresh(forceProbe = false) {
+  try {
+    const s = await describeEc2();
+    setState(s);
+    pollWarmupProgress(s).catch(() => {});   // XYZ-PILOT-291 Option B (best-effort)
+    pollLicenseEvidence(forceProbe).catch(() => {}); // XYZ-PILOT-289 (best-effort)
+    if (s === "running") {
+      loadServiceProbes(forceProbe).catch(e => log("service_probe failed: " + e.message, "err"));
+    }
+  } catch (e) {
+    log("DescribeInstances failed: " + e.message, "err");
+  }
+}
+
+// ─── XYZ-PILOT-172 — in-flight UX feedback (Fix B Components 1 + 3) ─────────
+// Component 1: spinner + elapsed-time counter shown during start/stop in-flight
+// Component 3: keep BOTH buttons disabled until EC2 state is stable for N polls
+//              after the Lambda returns (covers the post-Lambda docker-settle window)
+let _inflightStart = 0;
+let _inflightTimer = null;
+let _stabilityPoll = null;
+
+function _fmtElapsed(ms) {
+  const s = Math.floor(ms / 1000);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+function startInflight(action, baseMessage) {
+  _inflightStart = Date.now();
+  const div = document.getElementById("inflight");
+  const text = document.getElementById("inflight-text");
+  const spinner = document.getElementById("inflight-spinner");
+  spinner.className = action === "stop" ? "spinner danger" : "spinner";
+  text.className = "inflight-status";
+  text.textContent = `${baseMessage} · 0:00 elapsed`;
+  div.style.display = "block";
+  if (_inflightTimer) clearInterval(_inflightTimer);
+  _inflightTimer = setInterval(() => {
+    text.textContent = `${baseMessage} · ${_fmtElapsed(Date.now() - _inflightStart)} elapsed`;
+  }, 1000);
+  // Component 3: disable BOTH buttons unconditionally while in-flight, even
+  // before setState() catches up to the new EC2 state.
+  document.getElementById("startBtn").disabled = true;
+  document.getElementById("stopBtn").disabled = true;
+}
+
+function endInflight(ok, finalMessage) {
+  if (_inflightTimer) { clearInterval(_inflightTimer); _inflightTimer = null; }
+  const elapsed = _fmtElapsed(Date.now() - _inflightStart);
+  const text = document.getElementById("inflight-text");
+  const spinner = document.getElementById("inflight-spinner");
+  spinner.style.display = "none";
+  text.className = "inflight-status " + (ok ? "ok" : "err");
+  text.textContent = `${finalMessage} · total ${elapsed}`;
+  // Leave the badge visible for 8 seconds, then hide.
+  setTimeout(() => {
+    document.getElementById("inflight").style.display = "none";
+    spinner.style.display = "inline-block";  // reset for next click
+  }, 8000);
+}
+
+// Component 3: poll EC2 state every 5s until we get N consecutive readings of
+// the targetState. Only then trust setState() to re-enable the opposite button.
+// Prevents the post-Lambda-return ambiguous window where docker/MCP are still
+// settling and a quick second click would be a no-op (now caught by XYZ-PILOT-169
+// dedup gate, but better to prevent the click entirely).
+async function stabilityPoll(targetState, requiredConsecutive = 3, intervalMs = 5000, maxAttempts = 24) {
+  if (_stabilityPoll) { clearInterval(_stabilityPoll); _stabilityPoll = null; }
+  let consecutive = 0;
+  let attempt = 0;
+  return new Promise(resolve => {
+    _stabilityPoll = setInterval(async () => {
+      attempt++;
+      try {
+        const s = await describeEc2();
+        setState(s);
+        if (s === targetState) {
+          consecutive++;
+          if (consecutive >= requiredConsecutive) {
+            clearInterval(_stabilityPoll); _stabilityPoll = null;
+            log(`Stability poll: ${targetState} confirmed after ${attempt} polls`, "ok");
+            resolve(true);
+          }
+        } else {
+          consecutive = 0;
+        }
+      } catch (e) {
+        log("Stability poll DescribeInstances failed: " + e.message, "err");
+      }
+      if (attempt >= maxAttempts) {
+        clearInterval(_stabilityPoll); _stabilityPoll = null;
+        log(`Stability poll timed out after ${maxAttempts} attempts (${maxAttempts * intervalMs / 1000}s)`, "err");
+        resolve(false);
+      }
+    }, intervalMs);
+  });
+}
+
+// ─── Main flow ─────────────────────────────────────────────────────────────
+async function main() {
+  const topLogoutBtn = document.getElementById("topLogoutBtn");
+  if (topLogoutBtn) topLogoutBtn.onclick = logoutCognito;
+  const params = new URLSearchParams(window.location.search);
+
+  if (params.has("error")) {
+    document.body.innerHTML = "<h1>Sign-in error</h1><pre>" +
+      params.get("error") + " — " + (params.get("error_description") || "") + "</pre>";
+    return;
+  }
+
+  if (params.has("code")) {
+    const expectedState = getOAuthHandshake("oauth_state");
+    if (!expectedState) {
+      log("OAuth handshake state missing; restarting sign-in.", "err");
+      clearCachedTokens();
+      window.history.replaceState({}, "", CONFIG.redirectUri);
+      setTimeout(() => startOAuth(), 250);
+      return;
+    }
+    if (params.get("state") !== expectedState) {
+      throw new Error("OAuth state mismatch (possible CSRF) — aborting.");
+    }
+    try {
+      const tokens = await exchangeCode(params.get("code"));
+      storeTokens(tokens);
+      clearOAuthHandshake();
+      window.history.replaceState({}, "", CONFIG.redirectUri);
+      await initDashboard(sessionStorage.getItem("id_token"), sessionStorage.getItem("access_token"));
+    } catch (e) {
+      log("OAuth code exchange failed; restarting sign-in: " + e.message, "err");
+      clearCachedTokens();
+      window.history.replaceState({}, "", CONFIG.redirectUri);
+      setTimeout(() => startOAuth(), 250);
+    }
+    return;
+  }
+
+  const cached = sessionStorage.getItem("id_token");
+  const cachedAccess = sessionStorage.getItem("access_token");
+  const cachedRefresh = sessionStorage.getItem("refresh_token");
+  if (cached || cachedAccess || cachedRefresh) {
+    if (!cached || !cachedAccess || !cachedRefresh) {
+      log("Cached Cognito session lacks a refresh-capable token set; sign in once.", "err");
+      clearCachedTokens();
+    } else {
+      try {
+        // XYZ-PILOT-118: if cached tokens are near expiry, silently refresh them
+        // before showing the dashboard. Falls back to a clean OAuth sign-in only
+        // when the refresh token is absent/expired/revoked.
+        const tokens = await ensureFreshTokens("page load");
+        await initDashboard(tokens.idToken, tokens.accessToken);
+        return;
+      } catch (e) {
+        log("Cached Cognito session could not be refreshed: " + e.message, "err");
+        clearCachedTokens();
+      }
+    }
+  }
+
+  document.getElementById("signin").style.display = "block";
+  showTopAuthBar(false);
+  document.getElementById("signinBtn").onclick = () => {
+    startOAuth().catch(e => log("OAuth start failed: " + e.message, "err"));
+  };
+}
+
+async function initDashboard(idToken, accessToken) {
+  document.getElementById("signin").style.display   = "none";
+  document.getElementById("loading").style.display  = "block";
+  showTopAuthBar(true);
+  try {
+    await configureAws(idToken);
+  } catch (e) {
+    const msg = (e && e.message) ? e.message : String(e);
+    // If the token aged out between the pre-check and the exchange (rare —
+    // 30s margin should catch it — or if Cognito's clock skew nudges it),
+    // clear the stale session and bounce straight to a fresh sign-in
+    // instead of leaving the user staring at an error card.
+    if (/Token expired|Invalid login token|NotAuthorizedException/i.test(msg)) {
+      clearCachedTokens();
+      showTopAuthBar(false);
+      document.getElementById("loading").innerHTML =
+        '<div class="card">Your Cognito session expired. Redirecting to ' +
+        'the sign-in page…</div>';
+      setTimeout(() => startOAuth(), 1200);
+      return;
+    }
+    document.getElementById("loading").innerHTML =
+      '<div class="card"><b>Identity Pool exchange failed.</b><br>' +
+      'Likely cause: your email is not authorised by the Lambda allowlist, ' +
+      'or the dashboard app client isn\'t registered with the Identity Pool.' +
+      '<pre>' + msg + '</pre></div>';
+    showTopAuthBar(false);
+    return;
+  }
+  let accessContext = null;
+  try {
+    accessContext = await invoke(CONFIG.userMgmtLambda, accessPayload({ action: "xyz_master_operator_context" }));
+    if (!accessContext.ok) throw new Error(accessContext.error || "operator context failed");
+  } catch (e) {
+    document.getElementById("loading").innerHTML =
+      '<div class="card"><b>Operator Dashboard authorization failed.</b><br>' +
+      'Your Cognito sign-in succeeded, but the role-context lookup failed.' +
+      '<pre>' + escapeHtml(e.message) + '</pre></div>';
+    showTopAuthBar(false);
+    return;
+  }
+  if (!accessContext.dashboard_access) {
+    document.getElementById("loading").innerHTML =
+      '<div class="card"><b>Operator Dashboard access is not enabled for this account.</b><br>' +
+      'XYZ_BIZ users can use the <PILOT_NAME> Chatbot and business data surfaces, ' +
+      'but they cannot access the Operator Dashboard.</div>';
+    return;
+  }
+  document.getElementById("loading").style.display    = "none";
+  document.getElementById("dashboard").style.display  = "block";
+  applyDashboardAccess(accessContext);
+  startRefreshLoop();
+
+  if (accessToken) {
+    userInfo(accessToken).then(u => {
+      if (u && u.email) document.getElementById("user").textContent = u.email;
+    }).catch(() => {});
+  }
+
+  document.getElementById("startBtn").onclick = async () => {
+    log("Invoking xyz-pilot-start …");
+    // XYZ-PILOT-172: spinner + elapsed counter + BOTH buttons disabled
+    // while in-flight (Fix B Components 1 + 3). Replaces the previous
+    // silent disabled-button window where users got impatient and
+    // clicked again (the pre-XYZ-PILOT-169 morning <OPS_USER_2> pattern).
+    startInflight("start", "Starting up… (typical 2–3 min — docker settle 60s + MCP probe ≤90s)");
+    let r = null;
+    try {
+      // XYZ-PILOT-077: pass the Cognito access token so the Lambda can
+      // identify YOU as the initiator + send the ad-hoc-start
+      // notification email naming who clicked + when.
+      const tokens = await ensureFreshTokens("ad-hoc start");
+      // XYZ-PILOT-173: when the ops-only checkbox is on, pass test_mode=true
+      // so the Lambda restricts notification to OPS_ONLY + XYZ_OPS only.
+      const testMode = document.getElementById("testModeCb").checked;
+      const payload = {
+        headers: { authorization: "Bearer " + tokens.accessToken },
+        test_mode: testMode,
+      };
+      if (testMode) log("Ops-only notification enabled for this START: OPS_ONLY + XYZ_OPS only (XYZ-PILOT-173)", "ok");
+      r = await invoke(CONFIG.startLambda, payload);
+      log("✓ start fired · " + JSON.stringify(r).slice(0,200), "ok");
+      if (r && r.ad_hoc) {
+        log("📧 ad-hoc start email queued · initiator=" + (r.initiator || "?"), "ok");
+      }
+      // XYZ-PILOT-169: Lambda return now exposes cold_started — if false,
+      // surface to the operator that no email was sent (dedup engaged).
+      if (r && r.ad_hoc && r.cold_started === false) {
+        log("ℹ️  env was already running — no duplicate email sent (XYZ-PILOT-169 dedup engaged)", "ok");
+      }
+    } catch (e) {
+      log("✗ start failed: " + e.message, "err");
+      endInflight(false, "✗ start failed: " + e.message);
+      return;
+    }
+    endInflight(true, r && r.cold_started === false
+      ? "✓ env was already running (no email)"
+      : "✓ start complete — email queued");
+    // XYZ-PILOT-172 Component 3: keep both buttons disabled until 3
+    // consecutive describe-instances polls confirm the new state is
+    // stable (~15s after the Lambda returns). Covers the post-Lambda
+    // docker/MCP settling window where a quick second click would no-op.
+    stabilityPoll("running").catch(e => log("stabilityPoll failed: " + e.message, "err"));
+  };
+
+  document.getElementById("stopBtn").onclick = async () => {
+    if (!confirm("Stop the EC2 instance? This will take chatbot, Streamlit, Grafana and MCP offline.")) return;
+    log("Invoking xyz-pilot-stop …");
+    // XYZ-PILOT-172 — see start handler above.
+    startInflight("stop", "Stopping… (typical 30s)");
+    let r = null;
+    try {
+      // XYZ-PILOT-080: pass the Cognito access token so the Lambda can
+      // identify YOU as the initiator + send the ad-hoc-stop
+      // notification email naming who clicked + when.
+      const tokens = await ensureFreshTokens("ad-hoc stop");
+      // XYZ-PILOT-173: when the ops-only checkbox is on, pass test_mode=true
+      // so the Lambda restricts notification to OPS_ONLY + XYZ_OPS only.
+      const testMode = document.getElementById("testModeCb").checked;
+      const payload = {
+        headers: { authorization: "Bearer " + tokens.accessToken },
+        test_mode: testMode,
+      };
+      if (testMode) log("Ops-only notification enabled for this STOP: OPS_ONLY + XYZ_OPS only (XYZ-PILOT-173)", "ok");
+      r = await invoke(CONFIG.stopLambda, payload);
+      log("✓ stop fired · " + JSON.stringify(r).slice(0,200), "ok");
+      if (r && r.ad_hoc) {
+        log("📧 ad-hoc stop email queued · initiator=" + (r.initiator || "?"), "ok");
+      }
+      // XYZ-PILOT-169: Lambda return now exposes transitioned — if false,
+      // surface to the operator that no email was sent (dedup engaged).
+      if (r && r.ad_hoc && r.transitioned === false) {
+        log("ℹ️  env was already stopped — no duplicate email sent (XYZ-PILOT-169 dedup engaged)", "ok");
+      }
+    } catch (e) {
+      log("✗ stop failed: " + e.message, "err");
+      endInflight(false, "✗ stop failed: " + e.message);
+      return;
+    }
+    endInflight(true, r && r.transitioned === false
+      ? "✓ env was already stopped (no email)"
+      : "✓ stop complete — email queued");
+    // XYZ-PILOT-172 Component 3 — see start handler above.
+    stabilityPoll("stopped").catch(e => log("stabilityPoll failed: " + e.message, "err"));
+  };
+
+  document.getElementById("refreshBtn").onclick = () => refresh(true);
+
+  // XYZ-PILOT-290 — wire up the resizable log panel (restore size + toggle).
+  initLogPanel();
+
+  // XYZ-PILOT-081 — wire up the password-retrieval card.
+  await initSecretPanel();
+
+  // XYZ-PILOT-116 — wire up the user-onboarding facility.
+  initUserMgmtPanel();
+
+  // XYZ-PILOT-127 — wire up the GitHub commit retriever.
+  if (CURRENT_ACCESS && CURRENT_ACCESS.full_operator) initGitHubPanel();
+
+  // XYZ-PILOT-215 — wire up the elevated-operator XYZ_MASTER approval backlog.
+  if (CURRENT_ACCESS && CURRENT_ACCESS.full_operator) initHpcMasterPanel();
+
+  // XYZ-PILOT-250 — wire up the Swarm Tester scheduler + pull-and-analyze panel.
+  if (CURRENT_ACCESS && CURRENT_ACCESS.full_operator) initSwarmPanel();
+
+  await refresh();
+  setInterval(refresh, CONFIG.pollMs);
+}
+
+// ─── XYZ-PILOT-215: XYZ_MASTER approval backlog ─────────────────────────────
+function initHpcMasterPanel() {
+  const card = document.getElementById("xyzMasterCard");
+  const out = document.getElementById("xyzMasterOut");
+  if (!card || !out) return;
+  const select = document.getElementById("xyzMasterCandidateSelect");
+  const severity = document.getElementById("xyzMasterSeveritySelect");
+  const mode = document.getElementById("xyzMasterModeSelect");
+  const approveBtn = document.getElementById("xyzMasterApproveBtn");
+  const denyBtn = document.getElementById("xyzMasterDenyBtn");
+  const denyReason = document.getElementById("xyzMasterDenyReasonSelect");
+  const duplicateOf = document.getElementById("xyzMasterDuplicateOfInput");
+  const auth = document.getElementById("xyzMasterAuth");
+  const elevationCard = document.getElementById("xyzElevationCard");
+  const elevationOut = document.getElementById("xyzElevationOut");
+  const elevationAuth = document.getElementById("xyzElevationAuth");
+  const issueSelect = document.getElementById("xyzElevationIssueSelect");
+  const targetSeverity = document.getElementById("xyzElevationSeveritySelect");
+  const elevationMode = document.getElementById("xyzElevationModeSelect");
+  const elevationApplyBtn = document.getElementById("xyzElevationApplyBtn");
+  const rationaleInput = document.getElementById("xyzElevationRationaleInput");
+  let current = null;
+  let elevationCurrent = null;
+  let elevated = false;
+  const localDecisions = new Map();
+
+  const accessPayload = (payload) => ({
+    ...payload,
+    headers: { authorization: "Bearer " + sessionStorage.getItem("access_token") },
+  });
+  const setOut = (txt) => { out.textContent = txt; };
+  const setElevationOut = (txt) => { if (elevationOut) elevationOut.textContent = txt; };
+  const setLocked = (locked) => {
+    card.classList.toggle("locked-card", locked);
+    if (elevationCard) elevationCard.classList.toggle("locked-card", locked);
+    approveBtn.disabled = locked;
+    denyBtn.disabled = locked;
+    severity.disabled = locked;
+    mode.disabled = locked;
+    denyReason.disabled = locked;
+    duplicateOf.disabled = locked;
+    if (issueSelect) issueSelect.disabled = locked;
+    if (targetSeverity) targetSeverity.disabled = locked;
+    if (elevationMode) elevationMode.disabled = locked;
+    if (elevationApplyBtn) elevationApplyBtn.disabled = locked;
+    if (rationaleInput) rationaleInput.disabled = locked;
+  };
+  const labelCandidate = (c) =>
+    `${c.run_id} · ${c.source} · #${c.candidate_index} · ${c.mutation_kind || "new-ticket"} · ${c.proposed_severity} · ${c.title}`;
+  const candidateKey = (c) => `${c.run_id}/${c.source}/${c.candidate_index}`;
+  const rememberLocalDecision = (c, action) => {
+    localDecisions.set(candidateKey(c), {
+      action,
+      at: new Date().toISOString(),
+    });
+  };
+  const labelIssue = (issue) =>
+    `${issue.id} · ${issue.severity} · ${issue.area || "Tracker"} · ${issue.title}`;
+  const renderDetail = (d) => {
+    const lines = [
+      `Candidate — ${d.title}`,
+      "",
+      `  Run ID:      ${d.run_id}`,
+      `  Source:      ${d.source}`,
+      `  Index:       ${d.candidate_index}`,
+      `  Kind:        ${d.mutation_kind || "new-ticket"}`,
+      `  Severity:    ${d.proposed_severity}`,
+      `  Status:      ${d.proposed_status}`,
+      `  Area:        ${d.proposed_area || "—"}`,
+      `  Path:        ${d.path}`,
+      "",
+      "Candidate body:",
+      "────────────────",
+      d.body || "(empty)",
+    ];
+    return lines.join("\n");
+  };
+  const renderIssue = (issue) => [
+      `Issue — ${issue.id}`,
+    "",
+    `  Current priority: ${issue.severity}`,
+    `  Status:           ${issue.status}`,
+    `  Area:             ${issue.area || "—"}`,
+    `  Title:            ${issue.title}`,
+    "",
+    "Choose a target priority and apply the change to create a standard XYZ_MASTER severity-transition candidate.",
+  ].join("\n");
+
+  function applyOperatorContext(r) {
+    elevated = !!(r && r.elevated_operator);
+    const label = elevated
+      ? `Elevated operator confirmed: ${r.email || "unknown"}`
+      : `Read-only: ${(r && r.email) || "current user"} is not an elevated XYZ_MASTER approver`;
+    auth.textContent = label;
+    if (elevationAuth) elevationAuth.textContent = label;
+    setLocked(!elevated);
+  }
+
+  async function loadOperatorContext() {
+    try {
+      const r = await invoke(CONFIG.userMgmtLambda, accessPayload({ action: "xyz_master_operator_context" }));
+      if (!r.ok) throw new Error(r.error || "operator context failed");
+      applyOperatorContext(r);
+    } catch (e) {
+      const msg = "Authorization check failed: " + e.message;
+      auth.textContent = msg;
+      if (elevationAuth) elevationAuth.textContent = msg;
+      setLocked(true);
+      log("✗ xyz_master_operator_context: " + e.message, "err");
+    }
+  }
+
+  async function loadCandidates() {
+    if (!elevated) {
+      select.innerHTML = '<option value="">Read-only (elevated XYZ_MASTER approval required)</option>';
+      setOut("Read-only: current user is not an elevated XYZ_MASTER approver.\nUse an OPS_ONLY account and refresh.");
+      return;
+    }
+    setOut("Loading pending XYZ_MASTER candidates …");
+    try {
+      const r = await invoke(CONFIG.userMgmtLambda, accessPayload({ action: "xyz_master_candidates" }));
+      applyOperatorContext(r);
+      if (!r.ok) {
+        select.innerHTML = `<option value="">⚠ ${r.error || "load failed"}</option>`;
+        setOut("✗ xyz_master_candidates failed: " + (r.error || "unknown error"));
+        return;
+      }
+      const allPending = r.pending || [];
+      const remoteKeys = new Set(allPending.map(candidateKey));
+      for (const key of Array.from(localDecisions.keys())) {
+        if (!remoteKeys.has(key)) localDecisions.delete(key);
+      }
+      const locallyHidden = [];
+      const visiblePending = allPending.filter((c) => {
+        const decision = localDecisions.get(candidateKey(c));
+        if (decision) {
+          locallyHidden.push({ ...c, local_decision: decision });
+          return false;
+        }
+        return true;
+      });
+      const backlogPending = visiblePending.filter((c) => (c.mutation_kind || "new-ticket") !== "severity-transition");
+      const elevationHidden = allPending.length - backlogPending.length;
+      select.innerHTML = '<option value="">— select pending candidate …</option>' +
+        backlogPending.map((c, i) => `<option value="${i}">${escapeHtml(labelCandidate(c))}</option>`).join("");
+      select._candidates = backlogPending;
+      current = null;
+      const s = r.suppressed || {};
+      const hidden = [
+        `decided=${s.decided || 0}`,
+        `historical=${s.historical || 0}`,
+        `already_tracked=${s.already_tracked || 0}`,
+        `housekeeping=${s.housekeeping || 0}`,
+        `burst=${s.burst || 0}`,
+        `scan_limit=${s.scan_limit || 0}`,
+      ].join(", ");
+      const burstFiles = (r.burst_files || []).map((b) =>
+        `- ${b.run_id} · ${b.source} · ${b.candidate_count} candidates hidden behind burst guard (${b.visible_limit} max): ${b.path}`
+      ).join("\n");
+      const localDecisionLines = locallyHidden.map((c) =>
+        `- ${c.run_id} · ${c.source} · #${c.candidate_index} hidden locally after ${c.local_decision.action} at ${formatUtc(c.local_decision.at)}`
+      ).join("\n");
+      const elevationLine = elevationHidden ? `\nPriority elevation candidates shown separately: ${elevationHidden}` : "";
+      setOut(backlogPending.length
+        ? `Pending backlog candidates: ${backlogPending.length}${elevationLine}\nHidden: ${hidden}; local_decisions=${locallyHidden.length}\nCutoff: ${r.min_run_id || "not set"}\nScanned files: ${r.candidate_files_scanned || 0}/${r.candidate_file_scan_limit || "?"}\n${localDecisionLines ? "\nSubmitted candidates awaiting GitHub outcome marker:\n" + localDecisionLines + "\n" : ""}${burstFiles ? "\nBurst-guarded files:\n" + burstFiles + "\n" : ""}\nSelect one candidate to inspect.`
+        : `No pending backlog candidates found.${elevationLine}\nHidden: ${hidden}; local_decisions=${locallyHidden.length}\nCutoff: ${r.min_run_id || "not set"}\nScanned files: ${r.candidate_files_scanned || 0}/${r.candidate_file_scan_limit || "?"}\n${localDecisionLines ? "\nSubmitted candidates awaiting GitHub outcome marker:\n" + localDecisionLines + "\n" : ""}${burstFiles ? "\nBurst-guarded files:\n" + burstFiles + "\n" : ""}\nAlready-decided, historical, already-tracked, housekeeping, severity-transition, burst-guarded, scan-limited, and locally submitted candidates are hidden.`);
+      log(`✓ xyz_master_candidates · ${backlogPending.length} backlog pending`, "ok");
+    } catch (e) {
+      setOut("✗ xyz_master_candidates failed: " + e.message);
+      if (auth.textContent === "Authorization unknown.") {
+        auth.textContent = "Authorization check blocked by candidate lookup failure: " + e.message;
+      }
+      log("✗ xyz_master_candidates: " + e.message, "err");
+    }
+  }
+
+  async function loadOpenIssues() {
+    if (!issueSelect || !elevationOut) return;
+    if (!elevated) {
+      issueSelect.innerHTML = '<option value="">Read-only (elevated XYZ_MASTER approval required)</option>';
+      setElevationOut("Read-only: current user is not an elevated XYZ_MASTER approver.");
+      return;
+    }
+    setElevationOut("Loading current Open tracker issues …");
+    try {
+      const r = await invoke(CONFIG.userMgmtLambda, accessPayload({ action: "xyz_master_open_issues" }));
+      applyOperatorContext(r);
+      if (!r.ok) {
+        issueSelect.innerHTML = `<option value="">⚠ ${r.error || "load failed"}</option>`;
+        setElevationOut("✗ xyz_master_open_issues failed: " + (r.error || "unknown error"));
+        return;
+      }
+      const issues = r.issues || [];
+      issueSelect.innerHTML = '<option value="">— select Open issue …</option>' +
+        issues.map((issue, i) => `<option value="${i}">${escapeHtml(labelIssue(issue))}</option>`).join("");
+      issueSelect._issues = issues;
+      elevationCurrent = null;
+      setElevationOut(issues.length
+        ? `Open priority issues: ${r.count}\nSelect one issue to inspect and change priority.`
+        : "No current Open tracker items found.");
+      log(`✓ xyz_master_open_issues · ${r.count} open`, "ok");
+    } catch (e) {
+      setElevationOut("✗ xyz_master_open_issues failed: " + e.message);
+      log("✗ xyz_master_open_issues: " + e.message, "err");
+    }
+  }
+
+  async function loadDetail() {
+    const idx = select.value;
+    const list = select._candidates || [];
+    if (idx === "" || !list[idx]) {
+      current = null;
+      setOut("(no candidate selected)");
+      return;
+    }
+    const c = list[idx];
+    setOut(`Loading candidate ${c.run_id}/${c.source} #${c.candidate_index} …`);
+    try {
+      const r = await invoke(CONFIG.userMgmtLambda, accessPayload({
+        action: "xyz_master_candidate_detail",
+        run_id: c.run_id,
+        source: c.source,
+        candidate_index: c.candidate_index,
+      }));
+      elevated = !!r.elevated_operator;
+      setLocked(!elevated);
+      if (!r.ok) {
+        setOut("✗ candidate_detail failed: " + (r.error || "unknown error"));
+        return;
+      }
+      current = r;
+      severity.value = r.proposed_severity || "minor";
+      setOut(renderDetail(r));
+    } catch (e) {
+      setOut("✗ candidate_detail failed: " + e.message);
+      log("✗ xyz_master_candidate_detail: " + e.message, "err");
+    }
+  }
+
+  document.getElementById("xyzMasterRefreshBtn").onclick = loadCandidates;
+  select.onchange = loadDetail;
+  if (document.getElementById("xyzElevationRefreshBtn")) {
+    document.getElementById("xyzElevationRefreshBtn").onclick = loadOpenIssues;
+  }
+  if (issueSelect) {
+    issueSelect.onchange = () => {
+      const idx = issueSelect.value;
+      const issues = issueSelect._issues || [];
+      if (idx === "" || !issues[idx]) {
+        elevationCurrent = null;
+        setElevationOut("(no Open issue selected)");
+        return;
+      }
+      elevationCurrent = issues[idx];
+      if (targetSeverity) {
+        targetSeverity.value = elevationCurrent.severity === "minor"
+          ? "major"
+          : (elevationCurrent.severity === "major" ? "critical" : "major");
+      }
+      setElevationOut(renderIssue(elevationCurrent));
+    };
+  }
+
+  approveBtn.onclick = async () => {
+    const selected = current;
+    if (!selected) { setOut("✗ select a candidate first"); return; }
+    const chosenSeverity = severity.value;
+    const chosenMode = mode.value;
+    const high = ["major", "critical"].includes(chosenSeverity);
+    if (high && chosenMode === "direct-main" && !["status-transition"].includes(selected.mutation_kind)) {
+      setOut("✗ direct-main is restricted to minor defects and feature requests. Choose PR mode for major/critical candidates.");
+      log("✗ xyz_master_dispatch_candidate blocked invalid high-severity direct-main request", "err");
+      return;
+    }
+    const msg = high
+      ? `Approve ${selected.run_id}/${selected.source} #${selected.candidate_index} as ${chosenSeverity.toUpperCase()} and launch ${chosenMode}?`
+      : `Approve ${selected.run_id}/${selected.source} #${selected.candidate_index} as ${chosenSeverity} and launch ${chosenMode}?`;
+    if (!confirm(msg)) return;
+    setOut(`Dispatching XYZ_MASTER background filing workflow (${chosenMode}) …`);
+    try {
+      const r = await invoke(CONFIG.userMgmtLambda, accessPayload({
+        action: "xyz_master_dispatch_candidate",
+        run_id: selected.run_id,
+        source: selected.source,
+        candidate_index: selected.candidate_index,
+        classification_override: chosenSeverity,
+        mode: chosenMode,
+      }));
+      setOut(JSON.stringify(r, null, 2));
+      log((r.ok ? "✓" : "✗") + ` xyz_master_dispatch_candidate ${selected.run_id}/${selected.source}`, r.ok ? "ok" : "err");
+      // Mirror the deny-handler's post-success refresh (L1437) so the
+      // dropdown doesn't keep the just-approved candidate selectable.
+      // Approve dispatches a GitHub workflow that commits the
+      // candidate-outcome marker ~30-60 s later; do an immediate refresh
+      // to clear local UI state + a deferred refresh once the workflow
+      // is likely complete so the dropdown actually drains. The deferred
+      // refresh is best-effort — if the operator already moved on, no harm.
+      if (r.ok) {
+        rememberLocalDecision(selected, "approved");
+        loadCandidates();
+        setTimeout(() => loadCandidates(), 45000);
+        setTimeout(() => loadCandidates(), 90000);
+      }
+    } catch (e) {
+      setOut("✗ dispatch failed: " + e.message);
+      log("✗ xyz_master_dispatch_candidate: " + e.message, "err");
+    }
+  };
+
+  if (elevationApplyBtn) {
+    elevationApplyBtn.onclick = async () => {
+      if (!elevationCurrent) { setElevationOut("✗ select an Open issue first"); return; }
+      const target = targetSeverity.value;
+      const chosenMode = elevationMode.value;
+      if (target === elevationCurrent.severity) {
+        setElevationOut(`✗ ${elevationCurrent.id} is already ${target}`);
+        return;
+      }
+      if (!confirm(`Change ${elevationCurrent.id} priority from ${elevationCurrent.severity} to ${target} and launch ${chosenMode}?`)) return;
+      setElevationOut(`Creating priority-change candidate and dispatching XYZ_MASTER (${chosenMode}) …`);
+      try {
+        const r = await invoke(CONFIG.userMgmtLambda, accessPayload({
+          action: "xyz_master_request_priority_change",
+          issue_id: elevationCurrent.id,
+          target_severity: target,
+          mode: chosenMode,
+          rationale: rationaleInput.value.trim(),
+        }));
+        setElevationOut(JSON.stringify(r, null, 2));
+        log((r.ok ? "✓" : "✗") + ` xyz_master_request_priority_change ${elevationCurrent.id}`, r.ok ? "ok" : "err");
+        if (r.ok) {
+          loadCandidates();
+          loadOpenIssues();
+        }
+      } catch (e) {
+        setElevationOut("✗ priority change failed: " + e.message);
+        log("✗ xyz_master_request_priority_change: " + e.message, "err");
+      }
+    };
+  }
+
+  denyBtn.onclick = async () => {
+    if (!current) { setOut("✗ select a candidate first"); return; }
+    const reason = denyReason.value;
+    const dup = duplicateOf.value.trim().toUpperCase();
+    if (reason === "duplicate" && !/^XYZ-PILOT-\d{3}$/.test(dup)) {
+      setOut("✗ duplicate denial requires duplicate of XYZ-PILOT-NNN");
+      return;
+    }
+    if (!confirm(`Deny ${current.run_id}/${current.source} #${current.candidate_index} as ${reason}?`)) return;
+    setOut("Writing denial candidate-outcome marker …");
+    try {
+      const r = await invoke(CONFIG.userMgmtLambda, accessPayload({
+        action: "xyz_master_deny_candidate",
+        run_id: current.run_id,
+        source: current.source,
+        candidate_index: current.candidate_index,
+        reason,
+        duplicate_of: dup,
+      }));
+      setOut(JSON.stringify(r, null, 2));
+      log((r.ok ? "✓" : "✗") + ` xyz_master_deny_candidate ${current.run_id}/${current.source}`, r.ok ? "ok" : "err");
+      if (r.ok) {
+        rememberLocalDecision(current, "denied");
+        loadCandidates();
+      }
+    } catch (e) {
+      setOut("✗ deny failed: " + e.message);
+      log("✗ xyz_master_deny_candidate: " + e.message, "err");
+    }
+  };
+
+  (async () => {
+    await loadOperatorContext();
+    await loadCandidates();
+    await loadOpenIssues();
+  })();
+}
+
+// ─── XYZ-PILOT-127: GitHub Repository Commit Retriever ───────────────────────
+function initGitHubPanel() {
+  const out = document.getElementById("ghOut");
+  if (!out) return;  // card not present in this dashboard build
+  const setOut = (txt) => { out.textContent = txt; };
+
+  // Default the date input to yesterday (UTC) — common operator query
+  const _yesterday = () => {
+    const d = new Date(Date.now() - 86400000);
+    return d.toISOString().slice(0, 10);
+  };
+  const _today = () => new Date().toISOString().slice(0, 10);
+  document.getElementById("ghDateInput").value = _yesterday();
+
+  // Populate collaborator dropdown on first render
+  (async () => {
+    try {
+      const r = await invoke(CONFIG.userMgmtLambda, accessPayload({ action: "github_collaborators" }));
+      const sel = document.getElementById("ghCollabSelect");
+      if (!r.ok) {
+        sel.innerHTML = `<option value="">⚠ ${r.error || "load failed"}</option>`;
+        return;
+      }
+      sel.innerHTML = '<option value="">— select a collaborator …</option>' +
+        r.collaborators.map(c =>
+          `<option value="${c.login}">${c.login} (${c.role})</option>`
+        ).join("");
+    } catch (e) {
+      log("✗ github_collaborators: " + e.message, "err");
+    }
+  })();
+
+  const renderCommits = (data) => {
+    if (!data.ok) return `✗ ${data.error || "lookup failed"}`;
+    const header = data.action === "github_commits_on_date"
+      ? `Commits on ${data.date} (${data.count} total) on ${data.repo}:`
+      : `Commits by ${data.author || "(all authors)"} · last ${data.days} days · ${data.count} of ≤20 returned on ${data.repo}:`;
+    const lines = [header, ""];
+    if (data.commits.length === 0) {
+      lines.push("  (none)");
+      return lines.join("\n");
+    }
+    for (const c of data.commits) {
+      const date = (c.date || "?").slice(0, 19).replace("T", " ");
+      const addDel = c.additions !== undefined ? ` +${c.additions}/-${c.deletions}` : "";
+      lines.push(`  ${c.sha}  ${date}  ${(c.author_name || "?").padEnd(28)}${addDel}`);
+      lines.push(`      ${c.subject}`);
+      if (c.files && c.files.length) {
+        for (const f of c.files.slice(0, 6)) {
+          lines.push(`        ${f.status === "added" ? "+" : f.status === "removed" ? "−" : "•"} ${f.filename}  +${f.additions}/-${f.deletions}`);
+        }
+        if (c.files.length > 6) lines.push(`        … ${c.files.length - 6} more files`);
+      }
+      lines.push("");
+    }
+    return lines.join("\n");
+  };
+
+  document.getElementById("ghByAuthorBtn").onclick = async () => {
+    const author = document.getElementById("ghCollabSelect").value;
+    const days = parseInt(document.getElementById("ghDaysInput").value || "30", 10);
+    if (!author) { setOut("✗ please select a collaborator from the dropdown first"); return; }
+    setOut(`Fetching commits by ${author} (last ${days} days) — this can take 5-20 s (1 GitHub API call per commit for files) …`);
+    try {
+      const r = await invoke(CONFIG.userMgmtLambda, accessPayload({ action: "github_commits", author, days, with_files: true }));
+      setOut(renderCommits(r));
+      log((r.ok ? "✓" : "✗") + ` github_commits ${author} ${days}d`, r.ok ? "ok" : "err");
+    } catch (e) {
+      setOut("✗ github_commits failed: " + e.message);
+      log("✗ github_commits: " + e.message, "err");
+    }
+  };
+
+  document.getElementById("ghYesterdayBtn").onclick = () => {
+    document.getElementById("ghDateInput").value = _yesterday();
+  };
+  document.getElementById("ghTodayBtn").onclick = () => {
+    document.getElementById("ghDateInput").value = _today();
+  };
+
+  document.getElementById("ghByDateBtn").onclick = async () => {
+    const date = document.getElementById("ghDateInput").value;
+    if (!date) { setOut("✗ pick a date (or click Yesterday/Today)"); return; }
+    setOut(`Fetching all commits on ${date} (UTC) — this can take 5-30 s depending on how busy that day was …`);
+    try {
+      const r = await invoke(CONFIG.userMgmtLambda, accessPayload({ action: "github_commits_on_date", date, with_files: true }));
+      setOut(renderCommits(r));
+      log((r.ok ? "✓" : "✗") + ` github_commits_on_date ${date} → ${r.count}`, r.ok ? "ok" : "err");
+    } catch (e) {
+      setOut("✗ github_commits_on_date failed: " + e.message);
+      log("✗ github_commits_on_date: " + e.message, "err");
+    }
+  };
+}
+
+// ─── XYZ-PILOT-116: New User Onboarding Facility ─────────────────────────────
+function initUserMgmtPanel() {
+  const out = document.getElementById("onboardOut");
+  const setOut = (txt) => { out.textContent = txt; };
+  const fmtTrail = (trail) => {
+    if (!trail || !Object.keys(trail).length) return [];
+    const lines = ["", "Onboarding watchdog trail:"];
+    for (const key of ["cognito", "ses", "sns"]) {
+      const r = trail[key];
+      if (!r) continue;
+      const parts = [`${key.toUpperCase()}=${r.status || "?"}`];
+      if (r.last_sent_at_utc) parts.push(`sent=${r.last_sent_at_utc}`);
+      if (r.sent_count) parts.push(`sent-count=${r.sent_count}`);
+      if (r.last_reissued_at_utc) parts.push(`reissued=${r.last_reissued_at_utc}`);
+      if (r.expires_at_utc) parts.push(`expires=${r.expires_at_utc}`);
+      if (r.possible_unsubscribe_at_utc) parts.push(`possible-unsubscribe=${r.possible_unsubscribe_at_utc}`);
+      if (r.detail) parts.push(`detail=${r.detail}`);
+      lines.push("  " + parts.join(" · "));
+    }
+    if (trail.reminder) {
+      const actions = (trail.reminder.actions || []).map(a => a.action).join(",");
+      lines.push(`  reminder sent=${trail.reminder.last_sent_at_utc || "?"} actions=${actions || "?"} cc=${(trail.reminder.cc || []).join(",")}`);
+    }
+    if (trail.weekly_reminder) {
+      const actions = (trail.weekly_reminder.actions || []).map(a => a.action).join(",");
+      lines.push(`  weekly reminder sent=${trail.weekly_reminder.last_sent_at_utc || "?"} actions=${actions || "?"} cc=${(trail.weekly_reminder.cc || []).join(",")}`);
+    }
+    if (trail.deactivation) {
+      lines.push(`  DEACTIVATED recorded=${trail.deactivation.recorded_at_utc || "?"} source=${trail.deactivation.source || "?"}`);
+      lines.push(`    reason=${trail.deactivation.reason || "?"}`);
+      lines.push(`    denied=${(trail.deactivation.denied || []).join(",") || "?"}`);
+    }
+    if (trail.deactivation_notice) {
+      lines.push(`  rejection heads-up sent=${trail.deactivation_notice.sent_at_utc || "?"} recipients=${(trail.deactivation_notice.recipients || []).join(",")}`);
+    }
+    return lines;
+  };
+
+  const renderCohort = (data) => {
+    if (!data.by_status) return JSON.stringify(data, null, 2);
+    const order = ["CONFIRMED", "FORCE_CHANGE_PASSWORD", "UNCONFIRMED", "RESET_REQUIRED", "DEACTIVATED", "Unknown"];
+    const lines = [`Cohort context — ${data.total_users} subscribers in the Cognito pool:`, ""];
+    for (const status of order) {
+      const arr = data.by_status[status];
+      if (!arr || !arr.length) continue;
+      lines.push(`  ${status} (${arr.length})`);
+      for (const u of arr) {
+        const statusIcon = u.deactivated ? "⛔" : "·";
+        const ses = u.ses_status === "Success" ? "✓ SES Success" :
+                    u.ses_status === "Pending" ? "⚠ SES Pending" : `SES ${u.ses_status}`;
+        const enabled = u.cognito_enabled === false ? " · Cognito disabled" : "";
+        lines.push(`    ${statusIcon} ${u.short.padEnd(22)} ${ses}${enabled}`);
+      }
+      lines.push("");
+    }
+    return lines.join("\n");
+  };
+
+  const renderRegistered = (data) => {
+    if (!data.fully_registered) return JSON.stringify(data, null, 2);
+    const lines = [
+      `Fully-registered subscribers (Cognito CONFIRMED + SES Success):`,
+      `  ${data.summary.fully_registered_count} of ${data.summary.total} total`,
+      "",
+    ];
+    for (const u of data.fully_registered) {
+      lines.push(`  ✓ ${u.short.padEnd(22)} (${u.email})`);
+    }
+    if ((data.pending || []).length) {
+      lines.push("", `Pending — one or both active halves incomplete (${data.pending.length}):`);
+      for (const u of (data.pending || [])) {
+        const c = u.cognito_status === "CONFIRMED" ? "✓" : "⚠";
+        const s = u.ses_status === "Success" ? "✓" : "⚠";
+        lines.push(`  ${c}/${s}  ${u.short.padEnd(22)}  Cognito=${u.cognito_status}  SES=${u.ses_status}`);
+      }
+    }
+    if ((data.deactivated || []).length) {
+      lines.push("", `Deactivated / opt-out trail (${data.deactivated.length}):`);
+      for (const u of data.deactivated) {
+        const reason = (u.onboarding_trail && u.onboarding_trail.deactivation && u.onboarding_trail.deactivation.reason) || "Cognito disabled";
+        lines.push(`  ⛔ ${u.short.padEnd(22)} (${u.email})  ${reason}`);
+      }
+    }
+    return lines.join("\n");
+  };
+
+  const renderInvite = (data) => {
+    const lines = [`Invite result for ${data.email || "(unknown)"}: ` + (data.ok ? "✓ OK" : "✗ failed"), ""];
+    if (data.groups && data.groups.length) {
+      lines.push(`  Groups: ${data.groups.join(", ")}`, "");
+    }
+    for (const s of (data.steps || [])) {
+      const icon = s.ok ? (s.skipped ? "→" : "✓") : "✗";
+      lines.push(`  ${icon} ${s.step}: ${s.detail || s.error || ""}`);
+    }
+    return lines.join("\n");
+  };
+
+  document.getElementById("onboardCohortBtn").onclick = async () => {
+    setOut("Fetching cohort table …");
+    try {
+      const r = await invoke(CONFIG.userMgmtLambda, accessPayload({ action: "cohort_table" }));
+      setOut(renderCohort(r));
+      log("✓ user-mgmt cohort_table · " + r.total_users + " users", "ok");
+    } catch (e) {
+      setOut("✗ cohort_table failed: " + e.message);
+      log("✗ user-mgmt cohort_table: " + e.message, "err");
+    }
+  };
+
+  document.getElementById("onboardRegisteredBtn").onclick = async () => {
+    setOut("Fetching fully-registered users …");
+    try {
+      const r = await invoke(CONFIG.userMgmtLambda, accessPayload({ action: "list_registered" }));
+      setOut(renderRegistered(r));
+      log("✓ user-mgmt list_registered · " + r.summary.fully_registered_count + " fully-registered", "ok");
+    } catch (e) {
+      setOut("✗ list_registered failed: " + e.message);
+      log("✗ user-mgmt list_registered: " + e.message, "err");
+    }
+  };
+
+  // XYZ-PILOT-115(b) + XYZ-PILOT-117(f): populate the registered-users dropdown
+  // on first render so the operator can pick a target without typing.
+  const populateUserSelect = async () => {
+    const sel = document.getElementById("onboardUserSelect");
+    if (!sel || sel.dataset.populated === "1") return;
+    try {
+      const r = await invoke(CONFIG.userMgmtLambda, accessPayload({ action: "list_registered" }));
+      const items = [...(r.fully_registered || []), ...(r.pending || []), ...(r.deactivated || [])];
+      sel.innerHTML = '<option value="">— select a user …</option>' +
+        items.map(u => `<option value="${u.email}">${u.short} (${u.deactivated ? "⛔ deactivated" : (u.cognito_status === "CONFIRMED" && u.ses_status === "Success" ? "✓ fully-registered" : "⚠ pending")})</option>`).join("");
+      sel.dataset.populated = "1";
+    } catch (e) {
+      log("✗ user-select populate: " + e.message, "err");
+    }
+  };
+  populateUserSelect();
+
+  const renderStatus = (data) => {
+    if (!data.ok) return `✗ ${data.error || "lookup failed"}`;
+    const u = data.user;
+    return [
+      `Individual status — ${u.short} (${u.email})`,
+      "",
+      `  Cognito status:    ${u.cognito_status}`,
+      `  Cognito enabled:   ${u.cognito_enabled ? "✓ yes" : "✗ no"}`,
+      `  SES verification:  ${u.ses_status}`,
+      `  Created:           ${u.created || "?"}`,
+      `  Last modified:     ${u.modified || "?"}`,
+      `  Fully registered:  ${u.fully_registered ? "✓ YES (Cognito CONFIRMED + SES Success)" : "⚠ NO — onboarding incomplete"}`,
+      `  Deactivated:       ${u.deactivated ? "⛔ YES — no further reminders" : "no"}`,
+      ...fmtTrail(u.onboarding_trail),
+    ].join("\n");
+  };
+
+  const renderLoginHistory = (data) => {
+    // XYZ-PILOT-146: hybrid ASF + legacy CloudTrail login history.
+    if (!data.ok) return `✗ ${data.error || "lookup failed"}`;
+    const s = data.summary || {};
+    const sourceLabel = data.auth_source === "cognito_asf_plus_cloudtrail_legacy"
+      ? "Cognito ASF + legacy CloudTrail"
+      : "Cognito ASF";
+    const lines = [
+      `Login history — ${data.email} (last ${data.days} days · source: ${sourceLabel})`,
+      "",
+    ];
+    if (data.note) lines.push(`⚠ ${data.note}`, "");
+    lines.push(`Summary:`);
+    lines.push(`  Total events: ${s.total_events ?? 0}  (Pass: ${s.pass_count ?? 0}, Fail: ${s.fail_count ?? 0})`);
+    lines.push(`  Active days:  ${s.active_days ?? 0}`);
+    lines.push(`  First seen:   ${s.first_seen || "—"}`);
+    lines.push(`  Last seen:    ${s.last_seen || "—"}`);
+    lines.push(`  Window:       ${s.window_start || "—"} → ${s.window_end || "—"}`);
+    lines.push("");
+    if (data.by_day && data.by_day.length) {
+      lines.push("Per-day breakdown:");
+      lines.push("  date         total  pass  fail  first → last");
+      lines.push("  ─────────── ──────  ────  ────  ──────────────────────");
+      for (const d of data.by_day) {
+        lines.push(`  ${d.date}    ${String(d.total).padStart(5)}  ${String(d.pass).padStart(4)}  ${String(d.fail).padStart(4)}  ${d.first} → ${d.last}`);
+      }
+      lines.push("");
+    }
+    if (data.events && data.events.length) {
+      lines.push(`Recent events (up to ${data.events.length} most recent):`);
+      for (const ev of data.events) {
+        const flag = ev.event_response === "Pass" ? "✓" : "✗";
+        const loc = [ev.city, ev.country].filter(Boolean).join(", ") || "—";
+        lines.push(`  ${flag} ${ev.event_time}  ${(ev.event_type || "?").padEnd(20)}  ${(ev.ip_address || "—").padEnd(16)}  ${loc.padEnd(20)}  risk=${ev.risk_decision || "—"}`);
+      }
+    } else if (!data.note) {
+      lines.push("  (no auth events in window)");
+    }
+
+    const legacy = data.legacy_cloudtrail || null;
+    if (legacy) {
+      lines.push("");
+      lines.push("Legacy CloudTrail view (pre-ASF / pool-wide context):");
+      if (legacy.ok === false) {
+        lines.push(`  ⚠ ${legacy.error || "CloudTrail legacy lookup failed"}`);
+      } else {
+        const ps = legacy.pool_summary || {};
+        lines.push("  ⚠ Hosted-UI sign-ins before ASF are pool-wide in CloudTrail, not per-user.");
+        lines.push(`  Pool sign-in events: ${ps.total_signin_events ?? 0}`);
+        lines.push(`  Active days:          ${ps.active_days ?? 0}`);
+        lines.push(`  Window:               ${ps.window_start || "—"} → ${ps.window_end || "—"}`);
+        const poolRows = legacy.pool_signins_by_day || [];
+        if (poolRows.length) {
+          lines.push("");
+          lines.push("  Pool sign-ins by day:");
+          lines.push("    date         token  authorize  total");
+          lines.push("    ───────────  ─────  ─────────  ─────");
+          for (const d of poolRows) {
+            const token = d.Token_POST || 0;
+            const auth = d.OAuth2_Authorize_GET || 0;
+            lines.push(`    ${d.date}  ${String(token).padStart(5)}  ${String(auth).padStart(9)}  ${String(token + auth).padStart(5)}`);
+          }
+        }
+        const adminRows = legacy.admin_actions_for_user || [];
+        lines.push("");
+        if (adminRows.length) {
+          lines.push("  Admin actions targeting selected user:");
+          for (const ev of adminRows) {
+            lines.push(`    ${ev.event_time || "—"}  ${ev.event_name || "?"}`);
+          }
+        } else {
+          lines.push("  Admin actions targeting selected user: none in window");
+        }
+      }
+    }
+    return lines.join("\n");
+  };
+
+  document.getElementById("onboardStatusBtn").onclick = async () => {
+    const email = document.getElementById("onboardUserSelect").value;
+    if (!email) { setOut("✗ please select a user from the dropdown first"); return; }
+    setOut(`Looking up ${email} …`);
+    try {
+      const r = await invoke(CONFIG.userMgmtLambda, accessPayload({ action: "get_user_status", email }));
+      setOut(renderStatus(r));
+      log((r.ok ? "✓" : "✗") + " user-mgmt get_user_status " + email, r.ok ? "ok" : "err");
+    } catch (e) {
+      setOut("✗ get_user_status failed: " + e.message);
+      log("✗ user-mgmt get_user_status: " + e.message, "err");
+    }
+  };
+
+  document.getElementById("onboardLoginHistoryBtn").onclick = async () => {
+    const email = document.getElementById("onboardUserSelect").value;
+    if (!email) { setOut("✗ please select a user from the dropdown first"); return; }
+    setOut(`Fetching Cognito ASF + legacy CloudTrail login history for ${email} (last 30 days) — this can take 5-15 s …`);
+    try {
+      const r = await invoke(CONFIG.userMgmtLambda, accessPayload({ action: "login_history", email, days: 30 }));
+      setOut(renderLoginHistory(r));
+      log((r.ok ? "✓" : "✗") + " user-mgmt login_history " + email, r.ok ? "ok" : "err");
+    } catch (e) {
+      setOut("✗ login_history failed: " + e.message);
+      log("✗ user-mgmt login_history: " + e.message, "err");
+    }
+  };
+
+  document.getElementById("onboardInviteBtn").onclick = async () => {
+    const email = document.getElementById("onboardEmail").value.trim().toLowerCase();
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setOut("✗ please enter a valid email address");
+      return;
+    }
+    const groups = selectedInviteGroups();
+    if (!groups.length) {
+      setOut("✗ select at least one allowed Cognito group");
+      return;
+    }
+    if (!confirm("Invite " + email + " to Cognito group(s) " + groups.join(", ") + " and SES daily-status verification?")) return;
+    setOut("Inviting " + email + " — sending Cognito temp-password + SES verification and assigning groups …");
+    try {
+      const r = await invoke(CONFIG.userMgmtLambda, accessPayload({ action: "invite_user", email, groups }));
+      setOut(renderInvite(r));
+      const tag = r.ok ? "ok" : "err";
+      log((r.ok ? "✓" : "✗") + " invite " + email, tag);
+    } catch (e) {
+      setOut("✗ invite_user failed: " + e.message);
+      log("✗ user-mgmt invite_user: " + e.message, "err");
+    }
+  };
+}
+
+// ─── XYZ-PILOT-081: password retrieval ───────────────────────────────────────
+let _secretTimer = null;       // setTimeout handle for the 30 s auto-hide
+let _currentSecret = "";       // last retrieved value, for the Copy button
+
+async function initSecretPanel() {
+  const sel = document.getElementById("secretSelect");
+  // Populate the dropdown from the Lambda's list-mode response (no
+  // secret_id in payload → returns {available_secrets: [...]}).
+  try {
+    const accessToken = sessionStorage.getItem("access_token");
+    const r = await invoke(CONFIG.secretLambda, {
+      headers: { authorization: "Bearer " + accessToken },
+    });
+    const body = (r && typeof r === "object" && r.body)
+      ? (typeof r.body === "string" ? JSON.parse(r.body) : r.body)
+      : r;
+    const ids = (body && body.available_secrets) || [];
+    sel.innerHTML = "";
+    if (!ids.length) {
+      sel.innerHTML = '<option value="">(no secrets available)</option>';
+    } else {
+      const ph = document.createElement("option");
+      ph.value = ""; ph.textContent = "— choose a credential …";
+      sel.appendChild(ph);
+      for (const id of ids) {
+        const o = document.createElement("option");
+        o.value = id;
+        o.textContent = SECRET_LABELS[id] || id;
+        sel.appendChild(o);
+      }
+    }
+  } catch (e) {
+    log("✗ secret list failed: " + e.message, "err");
+    sel.innerHTML = '<option value="">(list failed — see log)</option>';
+  }
+
+  document.getElementById("revealBtn").onclick = async () => {
+    const sid = sel.value;
+    if (!sid) {
+      document.getElementById("secretOut").textContent = "(choose a credential first)";
+      return;
+    }
+    document.getElementById("revealBtn").disabled = true;
+    document.getElementById("secretOut").textContent = "Retrieving …";
+    try {
+      const tokens = await ensureFreshTokens("secret reveal");
+      const accessToken = tokens.accessToken;
+      const r = await invoke(CONFIG.secretLambda, {
+        headers: { authorization: "Bearer " + accessToken },
+        secret_id: sid,
+      });
+      // Lambda returns {statusCode, body} when invoked via boto3-style,
+      // or plain dict when invoked via Function URL. Unwrap defensively.
+      let body = r;
+      if (r && typeof r.body === "string") body = JSON.parse(r.body);
+      else if (r && r.body) body = r.body;
+      const val = body && body.value;
+      if (!val) {
+        // Detect the access-token-expired error path even when the
+        // browser-side pre-check thought we were fine (clock skew, or
+        // Cognito rotated keys, etc.) — and auto-bounce instead of just
+        // showing the operator a confusing error.
+        const errMsg = (body && body.error) || "";
+        if (/invalid or expired Cognito token|NotAuthorized|expired/i.test(errMsg)) {
+          document.getElementById("secretOut").textContent = "Session expired — redirecting to sign-in…";
+          log("server rejected token, bouncing to OAuth: " + errMsg, "err");
+          clearCachedTokens();
+          setTimeout(() => startOAuth(), 800);
+          return;
+        }
+        throw new Error("Lambda returned no `value`: " + JSON.stringify(body).slice(0, 200));
+      }
+      _currentSecret = val;
+      document.getElementById("secretOut").textContent = val;
+      document.getElementById("copySecretBtn").disabled = false;
+      document.getElementById("hideSecretBtn").disabled = false;
+      log("✓ revealed " + sid + " (len=" + val.length + ", auto-hides in 30 s)", "ok");
+      if (_secretTimer) clearTimeout(_secretTimer);
+      _secretTimer = setTimeout(_hideSecret, 30000);
+    } catch (e) {
+      document.getElementById("secretOut").textContent = "(retrieval failed)";
+      log("✗ reveal failed: " + e.message, "err");
+    } finally {
+      document.getElementById("revealBtn").disabled = false;
+    }
+  };
+
+  document.getElementById("copySecretBtn").onclick = async () => {
+    if (!_currentSecret) return;
+    try {
+      await navigator.clipboard.writeText(_currentSecret);
+      log("✓ copied " + sel.value + " to clipboard", "ok");
+    } catch (e) {
+      log("✗ clipboard write blocked by browser: " + e.message, "err");
+    }
+  };
+
+  document.getElementById("hideSecretBtn").onclick = _hideSecret;
+}
+
+function _hideSecret() {
+  _currentSecret = "";
+  if (_secretTimer) { clearTimeout(_secretTimer); _secretTimer = null; }
+  document.getElementById("secretOut").textContent = "(no value yet)";
+  document.getElementById("copySecretBtn").disabled = true;
+  document.getElementById("hideSecretBtn").disabled = true;
+}
+
+// ─── XYZ-PILOT-250: Swarm Tester panel ─────────────────────────────────────────
+function initSwarmPanel() {
+  const scheduleCard = document.getElementById("swarmScheduleCard");
+  const analyzeCard  = document.getElementById("swarmAnalyzeCard");
+  if (!scheduleCard || !analyzeCard) return;
+
+  // XYZ-PILOT-250: default the run to today + the next :00/:30 boundary at least
+  // 30 min ahead, in CEST (independent of the operator's browser timezone).
+  // e.g. 12:28 CEST -> 13:00 CEST.
+  (function setSwarmDefaults() {
+    const cest = new Date(Date.now() + 2 * 3600 * 1000); // CEST wall-clock as UTC fields
+    cest.setUTCSeconds(0, 0);
+    cest.setUTCMinutes(cest.getUTCMinutes() + 30);        // >= 30 min lead
+    const rem = cest.getUTCMinutes() % 30;
+    if (rem !== 0) cest.setUTCMinutes(cest.getUTCMinutes() + (30 - rem)); // ceil to :00/:30
+    const iso = cest.toISOString();
+    const d = document.getElementById("swarm-date");
+    const t = document.getElementById("swarm-time");
+    if (d) d.value = iso.slice(0, 10);
+    if (t) t.value = iso.slice(11, 16);
+  })();
+
+  // Local accessPayload — same pattern as initHpcMasterPanel.
+  const accessPayload = (payload) => ({
+    ...payload,
+    headers: { authorization: "Bearer " + sessionStorage.getItem("access_token") },
+  });
+
+  async function scheduleSwarm() {
+    const agents = [...document.querySelectorAll('[id^="agent-"]:checked')].map(c => c.id.slice(6));
+    const recips  = [...document.querySelectorAll('[id^="recip-"]:checked')].map(c => c.dataset.email);
+    const stress  = +document.getElementById('swarm-stress').value;
+    const payload = accessPayload({
+      action:               "swarm_schedule",
+      date_cest:            document.getElementById('swarm-date').value,
+      time_cest:            document.getElementById('swarm-time').value,
+      agents,
+      stress_users:         stress,
+      allow_higher:         stress > 10,
+      session_hold_seconds: +document.getElementById('swarm-hold').value,
+      dry_run:              document.getElementById('swarm-dry').checked,
+      force_run:            document.getElementById('swarm-force').checked,
+      notify:               document.getElementById('swarm-notify').checked,
+      notify_recipients:    recips,
+      advanced:             document.getElementById('swarm-advanced').value,
+    });
+    try {
+      const r = await invoke(CONFIG.userMgmtLambda, payload);
+      log("Swarm scheduled: " + (r.name || JSON.stringify(r)) + (r.fires_at_cest ? " @ " + r.fires_at_cest : ""), "ok");
+      await refreshSwarmSchedules();
+    } catch (e) { log("Swarm schedule failed: " + (e && e.message ? e.message : e), "err"); }
+  }
+
+  async function refreshSwarmSchedules() {
+    try {
+      const r = await invoke(CONFIG.userMgmtLambda, accessPayload({ action: "swarm_schedules_list" }));
+      const el = document.getElementById('swarm-schedules');
+      const rows = (r.schedules || []).map(s =>
+        `<div style="display:flex;gap:.5em;align-items:center;margin-bottom:.25em;">` +
+        `<span style="flex:1;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.88em;">${s.name}</span>` +
+        `<button data-cancel="${s.name}" style="font-size:.82em;padding:.2em .5em;">Cancel</button></div>`).join("");
+      el.innerHTML = rows || '<div style="color:#666;font-size:.88em;">No scheduled runs.</div>';
+      el.querySelectorAll('[data-cancel]').forEach(b => b.onclick = async () => {
+        try {
+          await invoke(CONFIG.userMgmtLambda, accessPayload({ action: "swarm_schedule_cancel", name: b.dataset.cancel }));
+          log("Cancelled " + b.dataset.cancel, "ok");
+          await refreshSwarmSchedules();
+        } catch (e) { log("Cancel failed: " + (e && e.message ? e.message : e), "err"); }
+      });
+    } catch (e) { log("List schedules failed: " + (e && e.message ? e.message : e), "err"); }
+  }
+
+  async function refreshSwarmRuns() {
+    try {
+      const r = await invoke(CONFIG.userMgmtLambda, accessPayload({ action: "swarm_runs_list" }));
+      const sel = document.getElementById('swarm-run');
+      sel.innerHTML = (r.runs || []).length
+        ? (r.runs || []).map(x => `<option value="${x}">${x}</option>`).join("")
+        : '<option value="">No past runs found.</option>';
+    } catch (e) { log("Runs list failed: " + (e && e.message ? e.message : e), "err"); }
+  }
+
+  async function loadSwarmResults() {
+    const run = document.getElementById('swarm-run').value;
+    if (!run) return;
+    try {
+      const r = await invoke(CONFIG.userMgmtLambda, accessPayload({ action: "swarm_run_results", run_id: run }));
+      const rows = (r.agents || []).map(a =>
+        `<tr><td>${a.name}</td><td>${a.pass}</td><td>${a.fail}</td><td>${a.warn}</td></tr>`).join("");
+      document.getElementById('swarm-results').innerHTML =
+        `<table style="width:100%;border-collapse:collapse;font-size:.9em;">` +
+        `<thead><tr style="background:#f6f8fa;"><th style="text-align:left;padding:.35em .5em;border-bottom:1px solid #d0d7de;">Agent</th>` +
+        `<th style="padding:.35em .5em;border-bottom:1px solid #d0d7de;">PASS</th>` +
+        `<th style="padding:.35em .5em;border-bottom:1px solid #d0d7de;">FAIL</th>` +
+        `<th style="padding:.35em .5em;border-bottom:1px solid #d0d7de;">WARN</th></tr></thead>` +
+        `<tbody>${rows}</tbody></table>` +
+        `<div style="margin-top:.5em;font-size:.88em;color:#555;">` +
+        `Candidates: ${r.candidates ?? 0} · ` +
+        `<a href="${r.github_url}" target="_blank" rel="noopener">open on GitHub</a></div>`;
+    } catch (e) { log("Load results failed: " + (e && e.message ? e.message : e), "err"); }
+  }
+
+  // Wire up schedule button.
+  document.getElementById('swarm-schedule-btn').addEventListener('click', scheduleSwarm);
+
+  // Wire up load-and-analyze button.
+  document.getElementById('swarm-load-btn').addEventListener('click', loadSwarmResults);
+
+  // Populate lists on init (fire-and-forget; errors surface via log()).
+  refreshSwarmSchedules().catch(e => log("swarm init schedules: " + e.message, "err"));
+  refreshSwarmRuns().catch(e => log("swarm init runs: " + e.message, "err"));
+}
+
+renderDeploymentMeta();
+main().catch(e => {
+  console.error(e);
+  document.body.insertAdjacentHTML("beforeend",
+    '<pre class="err" style="color:#C0392B;background:#fff5f5;padding:12px;border-radius:6px">' +
+    e.message + "\n\n" + (e.stack || "") + "</pre>");
+});
+</script>
+</body>
+</html>

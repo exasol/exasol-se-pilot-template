@@ -1,0 +1,95 @@
+name: <PILOT_NAME> Chatbot Submission Notify
+
+# XYZ-PILOT-189 — close the "black hole" UX gap for chatbot-submitted defects /
+# feature requests. Fires when a tracker-mutating commit lands on `main` that
+# matches the XYZ_MASTER acceptance pattern (`XYZ_MASTER: file XYZ-PILOT-NNN ...`).
+# scripts/notify_submission.py parses the commit body for the consumed
+# chatbot candidate file path, extracts the submitter email from the candidate
+# file's `**Author:**` line, and fires an SES email confirming acceptance
+# with the allocated XYZ-PILOT-NNN + tracker URL.
+#
+# Cc: operator triumvirate (<OPERATOR_NAME> + <OPS_USER_2> + <OPS_USER_3>) per the
+# XYZ-PILOT-189 operator-confirmed design (2026-06-01).
+#
+# Denial path: deferred to Phase 2 once the chatbot UI is updated to
+# commit denial markers (current chatbot only commits accepted candidates).
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - docs/XYZ_PILOT_ISSUE_TRACKER.md
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Commit SHA to classify (default = HEAD)
+        required: false
+        default: HEAD
+      dry_run:
+        description: 'Dry run (set to "true" to skip SES send)'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: <AWS_REGION>
+  ROLE_TO_ASSUME: <AWS_ARN><AWS_ACCOUNT_ID>:role/xyz-pilot-github-submission-notify-ses
+  SES_SOURCE: <OPERATOR_EMAIL>
+
+concurrency:
+  group: xyz-pilot-submission-notify-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  notify:
+    name: Notify chatbot submitter on acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0  # need history to inspect commit subject + body
+
+      - name: Resolve target SHA
+        id: sha
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            sha="${{ inputs.sha }}"
+            if [ "$sha" = "HEAD" ]; then sha="$(git rev-parse HEAD)"; fi
+          else
+            sha="${{ github.sha }}"
+          fi
+          echo "sha=${sha}" >> "${GITHUB_OUTPUT}"
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: '3.13'
+
+      - name: Install boto3
+        run: pip install --quiet boto3==1.43.*
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c  # v6.2.3
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ env.ROLE_TO_ASSUME }}
+          role-session-name: xyz-pilot-submission-notify-${{ github.run_id }}
+
+      - name: Fire submission notification
+        env:
+          SES_SOURCE: ${{ env.SES_SOURCE }}
+        run: |
+          set -euo pipefail
+          args=( --sha "${{ steps.sha.outputs.sha }}" )
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            args+=( --dry-run )
+          fi
+          python3 scripts/notify_submission.py "${args[@]}"

@@ -1,0 +1,31 @@
+name: xyz-dashboard
+
+# <PILOT_NAME> DEV Operator Dashboard (reduced — 4 panels). Cognito-token-gated
+# backend on the node; AWS via the node instance role (IMDS). cloudflared
+# publishes it at xyz-pilot-dev-dashboard.<PILOT_DOMAIN>.
+
+services:
+  dashboard:
+    build: .
+    image: xyz-pilot-dev-dashboard:latest
+    container_name: xyz-dev-dashboard
+    restart: unless-stopped
+    env_file:
+      - .env
+    # Service-password panel reads these node .env files read-only:
+    volumes:
+      - /opt/xyz-qbr/.env:/secrets/qbr.env:ro
+      - /opt/xyz-grafana/.env:/secrets/grafana.env:ro
+      - /opt/xyz-mcp/.env:/secrets/mcp.env:ro
+    expose:
+      - "8080"
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: xyz-dev-dashboard-cloudflared
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml run
+    volumes:
+      - /opt/xyz-dashboard/cloudflared:/etc/cloudflared:ro
+    depends_on:
+      - dashboard

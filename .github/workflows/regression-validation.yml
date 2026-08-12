@@ -1,0 +1,39 @@
+name: <PILOT_NAME> Regression Validation (Advisory)
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: xyz-pilot-regression-validation-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fast-static:
+    name: Fast static regression checks
+    runs-on: ubuntu-latest
+    # XYZ-PILOT-198: advisory workflow — job-level continue-on-error so failures
+    # surface as warnings in the run page + step summary but do NOT fire a
+    # GitHub failure-notification email. Advisory checks are signal, not gate.
+    continue-on-error: true
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Run static regression checks
+        run: ./scripts/check_regression_static.py
+
+      - name: Verify tracker completeness
+        run: ./scripts/verify_tracker_completeness.sh
+
+      - name: Check GitHub workflow policy
+        run: python3 scripts/check_github_workflow_policy.py --github-warnings

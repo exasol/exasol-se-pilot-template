@@ -1,0 +1,119 @@
+name: <PILOT_NAME> OPS_ONLY Executive Statement
+
+# Manual-only OPS_ONLY management broadcast path.
+# Use when an operator needs a one-off executive or stakeholder statement sent
+# through the same OIDC-to-SES trust path as the existing tracker notification
+# workflows, without repurposing lifecycle START/STOP or daily-status emails.
+
+on:
+  workflow_dispatch:
+    inputs:
+      statement_path:
+        description: Repository-relative Markdown statement to send
+        required: true
+        default: docs/00-live-status/XYZ_PILOT_EXECUTIVE_MIDNIGHT_STATEMENT_2026-06-21T000000_CEST.md
+      confirm_send:
+        description: Set to true to send to OPS_ONLY; anything else is dry-run
+        required: true
+        default: "false"
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: <AWS_REGION>
+  ROLE_TO_ASSUME: <AWS_ARN><AWS_ACCOUNT_ID>:role/xyz-pilot-github-heads-up-ses
+  SES_SOURCE: <OPERATOR_EMAIL>
+
+concurrency:
+  group: xyz-pilot-ops-only-executive-statement
+  cancel-in-progress: false
+
+jobs:
+  send:
+    name: Send OPS_ONLY executive statement
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Validate statement input and build SES payload
+        id: payload
+        env:
+          STATEMENT_PATH: ${{ inputs.statement_path }}
+          CONFIRM_SEND: ${{ inputs.confirm_send }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          statement_path = Path(os.environ["STATEMENT_PATH"])
+          confirm_send = os.environ.get("CONFIRM_SEND", "").strip().lower()
+
+          if statement_path.is_absolute() or ".." in statement_path.parts:
+              raise SystemExit(f"unsafe statement path: {statement_path}")
+          if not statement_path.exists():
+              raise SystemExit(f"statement path not found: {statement_path}")
+          if statement_path.suffix.lower() != ".md":
+              raise SystemExit(f"statement path must be Markdown: {statement_path}")
+
+          body = statement_path.read_text(encoding="utf-8")
+          subject = "<PILOT_NAME> extraordinary midnight status: <AWS_REGION> readiness, test discipline, and UAT trust gate"
+          payload = {
+              "Source": os.environ["SES_SOURCE"],
+              "Destination": {
+                  "ToAddresses": [
+                      "<OPERATOR_EMAIL>",
+                      "<OPS_USER_2_EMAIL>",
+                      "<OPS_USER_3_EMAIL>",
+                  ],
+              },
+              "Message": {
+                  "Subject": {"Data": subject, "Charset": "UTF-8"},
+                  "Body": {"Text": {"Data": body, "Charset": "UTF-8"}},
+              },
+          }
+          out = Path("/tmp/xyz-ops-only-executive-statement.json")
+          out.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as fh:
+              fh.write(f"send={'true' if confirm_send == 'true' else 'false'}\n")
+              fh.write(f"payload={out}\n")
+              fh.write(f"statement_path={statement_path}\n")
+          print(f"Prepared SES payload from {statement_path}; confirm_send={confirm_send!r}")
+          PY
+
+      - name: Stop before SES send when not confirmed
+        if: steps.payload.outputs.send != 'true'
+        run: |
+          set -euo pipefail
+          echo "confirm_send was not true; dry-run only."
+
+      - name: Configure AWS credentials for SES
+        if: steps.payload.outputs.send == 'true'
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          role-to-assume: ${{ env.ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: xyz-pilot-ops-only-exec-${{ github.run_id }}
+
+      - name: Send statement via SES
+        if: steps.payload.outputs.send == 'true'
+        run: |
+          set -euo pipefail
+          aws ses send-email \
+            --region "${AWS_REGION}" \
+            --cli-input-json "file://${{ steps.payload.outputs.payload }}" \
+            --no-cli-pager > /tmp/xyz-ops-only-executive-statement-result.json
+          message_id="$(python3 -c 'import json; print(json.load(open("/tmp/xyz-ops-only-executive-statement-result.json")).get("MessageId", "<unknown>"))')"
+          echo "Sent OPS_ONLY executive statement as SES message ${message_id}"
+          {
+            echo "## OPS_ONLY executive statement"
+            echo
+            echo "- Statement: \`${{ steps.payload.outputs.statement_path }}\`"
+            echo "- SES MessageId: \`${message_id}\`"
+          } >> "${GITHUB_STEP_SUMMARY}"

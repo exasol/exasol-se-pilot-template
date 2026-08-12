@@ -1,0 +1,120 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadPilotRuntimeState",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:DescribeInstances",
+        "ec2:DescribeInstanceStatus",
+        "ec2:DescribeSecurityGroups",
+        "ec2:DescribeSubnets",
+        "ec2:DescribeVpcs",
+        "lambda:ListFunctions",
+        "lambda:GetFunctionConfiguration",
+        "tag:GetResources",
+        "events:ListRules",
+        "scheduler:ListSchedules"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "ProbePilotEc2HostViaSsm",
+      "Effect": "Allow",
+      "Action": "ssm:SendCommand",
+      "Resource": [
+        "<AWS_ARN><AWS_REGION>:<SOURCE_AWS_ACCOUNT_ID>:instance/<EC2_INSTANCE_ID>",
+        "<AWS_ARN><AWS_REGION>::document/AWS-RunShellScript"
+      ]
+    },
+    {
+      "Sid": "ReadPilotSsmCommandResult",
+      "Effect": "Allow",
+      "Action": "ssm:GetCommandInvocation",
+      "Resource": "*"
+    },
+    {
+      "Sid": "ReadScheduledE2eParameterMetadata",
+      "Effect": "Allow",
+      "Action": "ssm:DescribeParameters",
+      "Resource": "*"
+    },
+    {
+      "Sid": "ReadScheduledE2eSecureParameters",
+      "Effect": "Allow",
+      "Action": "ssm:GetParameter",
+      "Resource": [
+        "<AWS_ARN><AWS_REGION>:<SOURCE_AWS_ACCOUNT_ID>:parameter/xyz-pilot/chatbot/github-token",
+        "<AWS_ARN><AWS_REGION>:<SOURCE_AWS_ACCOUNT_ID>:parameter/xyz-pilot/secrets/exasol-xyz-dash"
+      ]
+    },
+    {
+      "Sid": "ReadRepoBackupLatestManifestMetadata",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "<AWS_ARN><SOURCE_AWS_ACCOUNT_ID>/latest/latest.json"
+    },
+    {
+      "Sid": "ReadPilotBucketMetadata",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetBucketLocation",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "<AWS_ARN><SOURCE_AWS_ACCOUNT_ID>",
+        "<AWS_ARN><SOURCE_AWS_ACCOUNT_ID>"
+      ]
+    },
+    {
+      "Sid": "ReadTargetControlPlaneMetadata",
+      "Effect": "Allow",
+      "Action": [
+        "cognito-idp:DescribeUserPool",
+        "cognito-idp:DescribeUserPoolClient",
+        "cognito-idp:ListUserPoolClients",
+        "cognito-idp:ListUserPools",
+        "ses:GetAccount",
+        "sns:ListSubscriptionsByTopic",
+        "sns:ListTopics"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "InvokeRegressionBedrockProfile",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:InvokeModel",
+        "bedrock:InvokeModelWithResponseStream"
+      ],
+      "Resource": [
+        "<AWS_ARN><AWS_REGION>:<SOURCE_AWS_ACCOUNT_ID>:inference-profile/eu.anthropic.claude-sonnet-4-6",
+        "<AWS_ARN><AWS_REGION>::foundation-model/anthropic.claude-sonnet-4-6*",
+        "<AWS_ARN>*",
+        "<AWS_ARN>*"
+      ]
+    },
+    {
+      "Sid": "SendE2eSwarmSummaryEmail",
+      "Effect": "Allow",
+      "Action": "ses:SendEmail",
+      "Resource": [
+        "<AWS_ARN><AWS_REGION>:<SOURCE_AWS_ACCOUNT_ID>:identity/<OPERATOR_EMAIL>",
+        "<AWS_ARN><AWS_REGION>:<SOURCE_AWS_ACCOUNT_ID>:identity/<OPS_USER_2_EMAIL>",
+        "<AWS_ARN><AWS_REGION>:<SOURCE_AWS_ACCOUNT_ID>:identity/<OPS_USER_3_EMAIL>"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "ses:FromAddress": "<OPERATOR_EMAIL>"
+        },
+        "ForAllValues:StringEquals": {
+          "ses:Recipients": [
+            "<OPERATOR_EMAIL>",
+            "<OPS_USER_2_EMAIL>",
+            "<OPS_USER_3_EMAIL>"
+          ]
+        }
+      }
+    }
+  ]
+}

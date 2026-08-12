@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title><PILOT_NAME> DEV — Operator Dashboard</title>
+<style>
+  :root { --ink:#1a2230; --mut:#5b6675; --line:#e2e6ec; --accent:#0b6bcb; --ok:#1aab40; --err:#c0392b; --bg:#f5f7fa; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:15px/1.5 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; color:var(--ink); background:var(--bg); }
+  header { background:#0e1726; color:#fff; padding:14px 22px; display:flex; align-items:center; justify-content:space-between; }
+  header h1 { font-size:1.05rem; margin:0; font-weight:600; letter-spacing:.2px; }
+  header .env { font-size:.72rem; background:#0b6bcb; padding:2px 8px; border-radius:10px; margin-left:10px; vertical-align:middle; }
+  main { max-width:920px; margin:22px auto; padding:0 18px; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:10px; padding:18px 20px; margin-bottom:18px; }
+  .card h2 { font-size:.95rem; margin:0 0 12px; display:flex; align-items:center; gap:8px; }
+  .card h2 .n { background:var(--bg); border:1px solid var(--line); border-radius:6px; font-size:.72rem; color:var(--mut); padding:1px 7px; }
+  button { font:inherit; border:1px solid var(--line); background:#fff; color:var(--ink); padding:8px 14px; border-radius:8px; cursor:pointer; }
+  button:hover { border-color:#c2c9d2; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  button.warn { background:#fff6f4; border-color:#e8c4bd; color:var(--err); }
+  button:disabled { opacity:.5; cursor:default; }
+  input { font:inherit; padding:8px 10px; border:1px solid var(--line); border-radius:8px; min-width:240px; }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .pill { display:inline-block; padding:2px 10px; border-radius:11px; font-size:.82rem; font-weight:600; }
+  .pill.running { background:#e7f7ec; color:var(--ok); } .pill.stopped { background:#fdecea; color:var(--err); } .pill.other { background:#eef1f5; color:var(--mut); }
+  table { width:100%; border-collapse:collapse; font-size:.9rem; }
+  td { padding:7px 6px; border-bottom:1px solid var(--line); }
+  td.k { color:var(--mut); white-space:nowrap; } td.v { font-family:ui-monospace,Menlo,monospace; word-break:break-all; }
+  a { color:var(--accent); text-decoration:none; } a:hover { text-decoration:underline; }
+  .msg { font-size:.86rem; margin-top:8px; min-height:1.1em; } .msg.ok { color:var(--ok); } .msg.err { color:var(--err); } .msg.mut { color:var(--mut); }
+  #gate { text-align:center; padding:64px 18px; }
+  .hidden { display:none; }
+  .foot { color:var(--mut); font-size:.78rem; text-align:center; margin:8px 0 30px; }
+</style>
+</head>
+<body>
+<header>
+  <h1><PILOT_NAME> — Operator Dashboard <span class="env">DEV · <AWS_REGION></span></h1>
+  <button id="logout" class="hidden">↪ Logout</button>
+</header>
+<main>
+  <div id="gate" class="card">
+    <p class="msg mut">Sign in with your <PILOT_NAME> DEV Cognito credentials.</p>
+    <button id="signin" class="primary">Sign in with Cognito</button>
+  </div>
+
+  <div id="app" class="hidden">
+    <div class="card">
+      <h2><span class="n">1</span> Environment — Start / Stop</h2>
+      <div class="row">
+        <span>Node state: <span id="state" class="pill other">…</span></span>
+        <button id="refresh">Refresh</button>
+        <button id="start" class="primary">▶ Start</button>
+        <button id="stop" class="warn">■ Stop</button>
+      </div>
+      <div id="ctlmsg" class="msg mut"></div>
+    </div>
+
+    <div class="card">
+      <h2><span class="n">2</span> Service URIs</h2>
+      <table id="uris"></table>
+    </div>
+
+    <div class="card">
+      <h2><span class="n">3</span> Service Passwords</h2>
+      <div class="row"><button id="reveal">Reveal service passwords</button><span id="secmsg" class="msg mut"></span></div>
+      <table id="secrets" class="hidden"></table>
+    </div>
+
+    <div class="card">
+      <h2><span class="n">4</span> New User Onboarding</h2>
+      <div class="row">
+        <input id="email" type="email" placeholder="new-user@exasol.com">
+        <button id="onboard" class="primary">Invite to DEV Cognito</button>
+      </div>
+      <div id="onbmsg" class="msg mut">Creates the user (email-verified); they set their own password.</div>
+    </div>
+  </div>
+  <div class="foot">DEV operator console · ad-hoc lifecycle · no XYZ_MASTER / swarm (UAT-only)</div>
+</main>
+<script>
+let CFG=null, TOK=null;
+const $=s=>document.querySelector(s);
+const b64url=buf=>btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+async function pkceChallenge(v){ const d=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(v)); return b64url(d); }
+function rand(n){ const a=new Uint8Array(n); crypto.getRandomValues(a); return b64url(a); }
+
+async function login(){
+  const v=rand(48); sessionStorage.setItem('pkce_v',v);
+  const c=await pkceChallenge(v);
+  const u=new URL(CFG.domain.replace(/\/$/,'')+'/oauth2/authorize');
+  u.search=new URLSearchParams({response_type:'code',client_id:CFG.clientId,redirect_uri:CFG.redirect,scope:'openid email profile',code_challenge:c,code_challenge_method:'S256'});
+  location.href=u;
+}
+async function exchange(code){
+  const v=sessionStorage.getItem('pkce_v');
+  const r=await fetch(CFG.domain.replace(/\/$/,'')+'/oauth2/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
+    body:new URLSearchParams({grant_type:'authorization_code',client_id:CFG.clientId,code,redirect_uri:CFG.redirect,code_verifier:v})});
+  if(!r.ok) throw new Error('token exchange failed');
+  const j=await r.json(); TOK=j.id_token; sessionStorage.setItem('id_token',TOK);
+  history.replaceState({},'',CFG.redirect);
+}
+function logout(){ sessionStorage.clear(); location.href=CFG.domain.replace(/\/$/,'')+'/logout?client_id='+CFG.clientId+'&logout_uri='+encodeURIComponent(CFG.redirect); }
+const api=(p,o={})=>fetch(p,{...o,headers:{...(o.headers||{}),'Authorization':'Bearer '+TOK,'Content-Type':'application/json'}});
+
+async function refreshState(){
+  $('#state').textContent='…'; $('#state').className='pill other';
+  try{ const j=await (await api('/api/status')).json(); const s=j.state||'?';
+    $('#state').textContent=s; $('#state').className='pill '+(s==='running'?'running':s==='stopped'?'stopped':'other'); }
+  catch{ $('#state').textContent='error'; }
+}
+async function act(a){
+  $('#ctlmsg').className='msg mut'; $('#ctlmsg').textContent=a+' requested…';
+  const r=await api('/api/'+a,{method:'POST'}); const j=await r.json();
+  if(r.ok){ $('#ctlmsg').className='msg ok'; $('#ctlmsg').textContent='✓ '+a+' invoked by '+j.by+' — refresh in ~1 min'; }
+  else { $('#ctlmsg').className='msg err'; $('#ctlmsg').textContent='✗ '+(j.error||'failed'); }
+}
+async function loadUris(){
+  const j=await (await api('/api/uris')).json();
+  $('#uris').innerHTML=j.map(u=>`<tr><td class="k">${u.label}</td><td class="v"><a href="${u.url}" target="_blank" rel="noopener">${u.url}</a></td></tr>`).join('');
+}
+async function reveal(){
+  $('#secmsg').textContent='retrieving…';
+  const j=await (await api('/api/secrets')).json();
+  $('#secrets').innerHTML=j.map(s=>`<tr><td class="k">${s.label}</td><td class="v">${s.value}</td></tr>`).join('');
+  $('#secrets').classList.remove('hidden'); $('#secmsg').textContent='';
+}
+async function onboard(){
+  const email=$('#email').value.trim();
+  $('#onbmsg').className='msg mut'; $('#onbmsg').textContent='inviting…';
+  const r=await api('/api/onboard',{method:'POST',body:JSON.stringify({email})}); const j=await r.json();
+  if(r.ok){ $('#onbmsg').className='msg ok'; $('#onbmsg').textContent='✓ '+j.email+' — '+j.note; }
+  else { $('#onbmsg').className='msg err'; $('#onbmsg').textContent='✗ '+(j.error||'failed'); }
+}
+function showApp(){
+  $('#gate').classList.add('hidden'); $('#app').classList.remove('hidden'); $('#logout').classList.remove('hidden');
+  refreshState(); loadUris();
+}
+(async()=>{
+  CFG=await (await fetch('/api/config')).json();
+  $('#signin').onclick=login; $('#logout').onclick=logout;
+  $('#refresh').onclick=refreshState; $('#start').onclick=()=>act('start'); $('#stop').onclick=()=>act('stop');
+  $('#reveal').onclick=reveal; $('#onboard').onclick=onboard;
+  const code=new URLSearchParams(location.search).get('code');
+  if(code){ try{ await exchange(code); }catch(e){} }
+  TOK=TOK||sessionStorage.getItem('id_token');
+  if(TOK) showApp();
+})();
+</script>
+</body>
+</html>

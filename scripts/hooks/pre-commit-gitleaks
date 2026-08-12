@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# XYZ-PILOT-072 — pre-commit gitleaks hook (catches secrets at commit time).
+#
+# Installed via: ./scripts/install_gitleaks_hook.sh
+# Blocking: fails the commit if gitleaks finds a credential-shaped string
+# in the staged diff. The CI workflow .github/workflows/secret-scan.yml is
+# the guaranteed gate; this local hook is the developer-side first line of
+# defence (catches the secret BEFORE it lands in any commit).
+#
+# Reads repo-root .gitleaks.toml for config + allowlists.
+#
+# Skipping the hook: `git commit --no-verify` bypasses (CLAUDE.md forbids
+# --no-verify unless explicitly approved; the bypass exists only for
+# emergency rollback scenarios).
+
+set -eu
+
+# Quick existence check — if gitleaks isn't installed locally, print a
+# clear install hint and exit 0 (don't block commits on missing tooling;
+# the CI workflow remains the guaranteed gate).
+if ! command -v gitleaks >/dev/null 2>&1; then
+    cat >&2 <<EOF
+========================================================================
+XYZ-PILOT-072 pre-commit hook installed but gitleaks not found on PATH.
+Install it locally for commit-time secret-scanning:
+
+  macOS:    brew install gitleaks
+  Windows:  scoop install gitleaks   (or winget install gitleaks.gitleaks)
+  Linux:    https://github.com/gitleaks/gitleaks/releases/latest
+  Codespace: download static binary from the release page above
+
+Without the local hook, the CI workflow .github/workflows/secret-scan.yml
+remains the guaranteed gate on push + PR. Commit proceeds.
+========================================================================
+EOF
+    exit 0
+fi
+
+REPO_ROOT=$(git rev-parse --show-toplevel)
+cd "$REPO_ROOT"
+
+# Scan the staged diff only (not the full repo — that's what `gitleaks
+# detect` does in CI; `gitleaks protect` is the pre-commit-shaped scan).
+if gitleaks protect --staged --source . --no-banner --redact --config .gitleaks.toml; then
+    exit 0
+else
+    # gitleaks exited non-zero → a candidate secret in staged content.
+    cat >&2 <<EOF
+========================================================================
+XYZ-PILOT-072 pre-commit hook BLOCKED the commit.
+
+gitleaks detected a credential-shaped string in the staged diff. Review
+the gitleaks output above. If the match is:
+
+  - A REAL secret → remove it from the staged content, rotate the secret
+    if exposed, and re-stage. NEVER \`git commit --no-verify\` to bypass
+    unless you're 100% sure it's a false positive.
+
+  - A FALSE POSITIVE → add the specific pattern to .gitleaks.toml's
+    allowlist with a cited reason + XYZ-PILOT-NNN reference, then re-stage
+    and re-commit.
+
+  - An EMERGENCY ROLLBACK (rare) → \`git commit --no-verify\` bypasses,
+    but CLAUDE.md forbids this unless explicitly operator-approved.
+    Document the bypass in the commit message body.
+========================================================================
+EOF
+    exit 1
+fi

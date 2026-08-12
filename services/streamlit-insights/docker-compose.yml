@@ -1,0 +1,48 @@
+name: xyz-qbr
+
+services:
+  streamlit:
+    build:
+      context: .
+      args:
+        XYZ_LAST_DEPLOYMENT_ISSUE: ${XYZ_LAST_DEPLOYMENT_ISSUE:-XYZ-PILOT-202}
+        XYZ_DEPLOYMENT_REF_URL: ${XYZ_DEPLOYMENT_REF_URL:-}
+        XYZ_BUILD_AT_UTC: ${XYZ_BUILD_AT_UTC:-not-stamped}
+        XYZ_DEPLOYED_AT_UTC: ${XYZ_DEPLOYED_AT_UTC:-not-stamped}
+    image: xyz-qbr-streamlit:latest
+    container_name: xyz-qbr-streamlit
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      XYZ_LAST_DEPLOYMENT_ISSUE: ${XYZ_LAST_DEPLOYMENT_ISSUE:-XYZ-PILOT-202}
+      XYZ_DEPLOYMENT_REF_URL: ${XYZ_DEPLOYMENT_REF_URL:-}
+      XYZ_BUILD_AT_UTC: ${XYZ_BUILD_AT_UTC:-not-stamped}
+      XYZ_DEPLOYED_AT_UTC: ${XYZ_DEPLOYED_AT_UTC:-not-stamped}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:8501:8501"
+    healthcheck:
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8501/_stcore/health',timeout=3).read()==b'ok' else 1)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: xyz-qbr-cloudflared
+    restart: unless-stopped
+    # Named tunnel (XYZ-PILOT-025) — stable URL xyz-pilot-qbr.<PILOT_DOMAIN>
+    # tunnel UUID e7327c19-2389-4ff8-b6bc-bbce69f1bec5
+    command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml run
+    volumes:
+      - /opt/xyz-qbr/cloudflared:/etc/cloudflared:ro
+    depends_on:
+      streamlit:
+        condition: service_healthy

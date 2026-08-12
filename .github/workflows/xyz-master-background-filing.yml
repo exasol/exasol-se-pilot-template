@@ -1,0 +1,310 @@
+name: XYZ_MASTER Background Filing (Manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Candidate run ID under tests/logs/runs
+        required: true
+      source:
+        description: Optional source folder, for example XYZ_PILOT_CHATBOT
+        required: false
+        default: ""
+      candidate_index:
+        description: One-based candidate index in the selected file
+        required: true
+        default: "1"
+      classification_override:
+        description: Optional operator-approved severity/classification override
+        required: false
+        default: ""
+      mode:
+        description: dry-run previews only; pr creates a branch and pull request; direct-main commits low-severity filings or approved status transitions to main
+        required: true
+        default: dry-run
+        type: choice
+        options:
+          - dry-run
+          - pr
+          - direct-main
+      operator_approved_high_severity:
+        description: Required for major/critical candidates in PR mode
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: xyz-master-background-filing
+  cancel-in-progress: false
+
+jobs:
+  background-filing:
+    name: Deterministic one-candidate filing
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: main
+          token: ${{ secrets.XYZ_MASTER_SERVICE_TOKEN || github.token }}
+
+      - name: Compile background filing helper
+        run: python3 -m py_compile scripts/xyz_master_background_filing.py scripts/write_candidate_outcome.py scripts/verify_xyz_master_candidate_outcomes.py
+
+      - name: Authorize elevated XYZ Pilot operator
+        env:
+          ALLOWED_ACTORS: ${{ vars.XYZ_MASTER_APPROVER_GITHUB_ACTORS }}
+        run: |
+          set -euo pipefail
+          allowed="${ALLOWED_ACTORS:-<GITHUB_OWNER>}"
+          actor="${GITHUB_ACTOR}"
+          ok=0
+          IFS=',' read -r -a actors <<< "${allowed}"
+          for candidate in "${actors[@]}"; do
+            candidate="$(printf '%s' "${candidate}" | xargs)"
+            if [ "${candidate}" = "${actor}" ]; then
+              ok=1
+              break
+            fi
+          done
+          if [ "${ok}" != "1" ]; then
+            echo "Actor ${actor} is not in XYZ_MASTER_APPROVER_GITHUB_ACTORS." >&2
+            echo "Only elevated XYZ Pilot operators may run this workflow." >&2
+            exit 1
+          fi
+          echo "Authorized elevated XYZ Pilot operator: ${actor}"
+
+      - name: Prepare common arguments
+        id: args
+        run: |
+          set -euo pipefail
+          args=(--run-id "${{ inputs.run_id }}" --candidate-index "${{ inputs.candidate_index }}")
+          if [ -n "${{ inputs.source }}" ]; then
+            args+=(--source "${{ inputs.source }}")
+          fi
+          if [ -n "${{ inputs.classification_override }}" ]; then
+            args+=(--classification-override "${{ inputs.classification_override }}")
+          fi
+          if [ "${{ inputs.operator_approved_high_severity }}" = "true" ]; then
+            args+=(--operator-approved-high-severity)
+          fi
+          printf 'args<<EOF\n' >> "${GITHUB_OUTPUT}"
+          printf '%q ' "${args[@]}" >> "${GITHUB_OUTPUT}"
+          printf '\nEOF\n' >> "${GITHUB_OUTPUT}"
+
+      - name: Dry-run candidate patch
+        id: dryrun
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2086
+          python3 scripts/xyz_master_background_filing.py \
+            --mode dry-run \
+            ${{ steps.args.outputs.args }} \
+            --diff-file /tmp/xyz-master-background-filing.diff \
+            --summary-file /tmp/xyz-master-background-filing.md \
+            --github-output "${GITHUB_OUTPUT}"
+          cat /tmp/xyz-master-background-filing.md >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Stop after dry-run
+        if: ${{ inputs.mode == 'dry-run' }}
+        run: |
+          set -euo pipefail
+          echo "Dry-run mode requested; no branch, commit, or PR was created."
+
+      - name: Enforce direct-main low-severity scope
+        if: ${{ inputs.mode == 'direct-main' }}
+        run: |
+          set -euo pipefail
+          classification="${{ steps.dryrun.outputs.classification }}"
+          mutation_kind="${{ steps.dryrun.outputs.mutation_kind }}"
+          if [ "${mutation_kind}" = "already-filed" ]; then
+            echo "direct-main allowed for idempotent ${mutation_kind} candidate outcome."
+            exit 0
+          fi
+          if [ "${mutation_kind}" = "status-transition" ]; then
+            echo "direct-main allowed for operator-approved ${mutation_kind}."
+            exit 0
+          fi
+          if [ "${mutation_kind}" = "severity-transition" ]; then
+            echo "direct-main allowed for operator-approved ${mutation_kind}."
+            exit 0
+          fi
+          if [ "${mutation_kind}" = "evidence-update" ]; then
+            echo "direct-main allowed for operator-approved ${mutation_kind}."
+            exit 0
+          fi
+          case "${classification}" in
+            minor|feature)
+              echo "direct-main allowed for ${classification} candidate."
+              ;;
+            *)
+              echo "direct-main is restricted to minor defects and feature requests; got ${classification}." >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Refresh main before direct apply
+        if: ${{ inputs.mode == 'direct-main' }}
+        run: |
+          set -euo pipefail
+          git pull --ff-only origin main
+
+      - name: Create PR branch
+        if: ${{ inputs.mode == 'pr' }}
+        id: branch
+        run: |
+          set -euo pipefail
+          branch="xyz-master/background-filing/${{ inputs.run_id }}-${{ inputs.candidate_index }}-${{ github.run_id }}"
+          git switch -c "${branch}"
+          echo "branch=${branch}" >> "${GITHUB_OUTPUT}"
+
+      - name: Apply one-candidate filing
+        if: ${{ inputs.mode == 'pr' || inputs.mode == 'direct-main' }}
+        id: apply
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2086
+          python3 scripts/xyz_master_background_filing.py \
+            --mode apply \
+            ${{ steps.args.outputs.args }} \
+            --summary-file /tmp/xyz-master-background-filing-apply.md \
+            --github-output "${GITHUB_OUTPUT}"
+          cat /tmp/xyz-master-background-filing-apply.md >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Commit one-candidate filing
+        if: ${{ inputs.mode == 'pr' || inputs.mode == 'direct-main' }}
+        env:
+          MUTATION_KIND: ${{ steps.apply.outputs.mutation_kind }}
+          TRACKER_ID: ${{ steps.apply.outputs.tracker_id }}
+          TRACKER_STATUS: ${{ steps.apply.outputs.tracker_status }}
+          CLASSIFICATION: ${{ steps.apply.outputs.classification }}
+          TITLE: ${{ steps.apply.outputs.title }}
+          CAND_FILE: ${{ steps.apply.outputs.candidate_file }}
+          CAND_INDEX: ${{ steps.apply.outputs.candidate_index }}
+          ARCHIVE_PATH: ${{ steps.apply.outputs.archive_path }}
+          OUTCOME_PATH: ${{ steps.apply.outputs.outcome_path }}
+          MODE: ${{ inputs.mode }}
+        run: |
+          set -euo pipefail
+          git config user.name "XYZ_MASTER_SERVICE"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          paths=()
+          if [ "$MUTATION_KIND" != "already-filed" ]; then
+            paths+=(docs/XYZ_PILOT_ISSUE_TRACKER.md)
+          fi
+          if [ -n "$ARCHIVE_PATH" ]; then
+            paths+=("$ARCHIVE_PATH")
+          fi
+          paths+=("$OUTCOME_PATH")
+          git add "${paths[@]}"
+          git diff --cached --stat
+          if [ "$MODE" = "direct-main" ]; then
+            if [ "$MUTATION_KIND" = "already-filed" ]; then
+              git commit \
+                -m "XYZ_MASTER: record already-filed $TRACKER_ID candidate" \
+                -m "Generated by the XYZ-PILOT-215 deterministic background filing workflow." \
+                -m "Candidate source: $CAND_FILE" \
+                -m "Candidate index: $CAND_INDEX" \
+                -m "Classification: $CLASSIFICATION" \
+                -m "No tracker mutation was needed because the detail title already exists." \
+                -m "Co-Authored-By: OpenAI Codex <<OPERATOR_EMAIL>>"
+            elif [ "$MUTATION_KIND" = "status-transition" ]; then
+              git commit \
+                -m "XYZ_MASTER: update $TRACKER_ID status ($TRACKER_STATUS)" \
+                -m "Generated by the XYZ-PILOT-215 deterministic background status-transition workflow." \
+                -m "Candidate source: $CAND_FILE" \
+                -m "Candidate index: $CAND_INDEX" \
+                -m "Classification: $CLASSIFICATION" \
+                -m "Direct-main status transitions require elevated-operator workflow dispatch." \
+                -m "Co-Authored-By: OpenAI Codex <<OPERATOR_EMAIL>>"
+            elif [ "$MUTATION_KIND" = "severity-transition" ]; then
+              git commit \
+                -m "XYZ_MASTER: update $TRACKER_ID severity ($CLASSIFICATION)" \
+                -m "Generated by the XYZ-PILOT-215 deterministic background severity-transition workflow." \
+                -m "Candidate source: $CAND_FILE" \
+                -m "Candidate index: $CAND_INDEX" \
+                -m "Classification: $CLASSIFICATION" \
+                -m "Direct-main severity transitions require elevated-operator workflow dispatch." \
+                -m "Co-Authored-By: OpenAI Codex <<OPERATOR_EMAIL>>"
+            elif [ "$MUTATION_KIND" = "evidence-update" ]; then
+              git commit \
+                -m "XYZ_MASTER: add evidence to $TRACKER_ID" \
+                -m "Generated by the XYZ-PILOT-215 deterministic background evidence-update workflow." \
+                -m "Candidate source: $CAND_FILE" \
+                -m "Candidate index: $CAND_INDEX" \
+                -m "Classification: $CLASSIFICATION" \
+                -m "Direct-main evidence updates require elevated-operator workflow dispatch." \
+                -m "Co-Authored-By: OpenAI Codex <<OPERATOR_EMAIL>>"
+            else
+              git commit \
+                -m "XYZ_MASTER: file $TRACKER_ID ($TITLE)" \
+                -m "Generated by the XYZ-PILOT-215 deterministic background filing workflow." \
+                -m "Candidate source: $CAND_FILE" \
+                -m "Candidate index: $CAND_INDEX" \
+                -m "Classification: $CLASSIFICATION" \
+                -m "Direct-main mode is restricted to minor defects and feature requests." \
+                -m "Co-Authored-By: OpenAI Codex <<OPERATOR_EMAIL>>"
+            fi
+          else
+            git commit \
+              -m "XYZ_MASTER_SERVICE: propose $TRACKER_ID filing" \
+              -m "Generated by the XYZ-PILOT-215 deterministic background filing workflow for candidate $CAND_INDEX from $CAND_FILE." \
+              -m "This PR preserves the one-ticket-per-invocation guardrail and requires operator review before merge." \
+              -m "Co-Authored-By: OpenAI Codex <<OPERATOR_EMAIL>>"
+          fi
+
+      - name: Push direct-main filing
+        if: ${{ inputs.mode == 'direct-main' }}
+        run: |
+          set -euo pipefail
+          git push origin HEAD:main
+
+      - name: Verify durable direct-main outcome
+        if: ${{ inputs.mode == 'direct-main' }}
+        run: |
+          set -euo pipefail
+          git pull --ff-only origin main
+          python3 scripts/verify_xyz_master_candidate_outcomes.py \
+            --run-id "${{ inputs.run_id }}" \
+            --source "${{ inputs.source }}" \
+            --candidate-index "${{ inputs.candidate_index }}" \
+            --warn-missing-siblings \
+            --summary-file /tmp/xyz-master-candidate-outcome-validation.md
+          cat /tmp/xyz-master-candidate-outcome-validation.md >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Push PR branch
+        if: ${{ inputs.mode == 'pr' }}
+        run: |
+          set -euo pipefail
+          git push --set-upstream origin "${{ steps.branch.outputs.branch }}"
+
+      - name: Create pull request
+        if: ${{ inputs.mode == 'pr' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          {
+            echo "Automated XYZ_MASTER background filing proposal."
+            echo
+            echo "- Tracker ID: ${{ steps.apply.outputs.tracker_id }}"
+            echo "- Mutation kind: ${{ steps.apply.outputs.mutation_kind }}"
+            echo "- Classification: ${{ steps.apply.outputs.classification }}"
+            echo "- Candidate: ${{ steps.apply.outputs.candidate_file }} candidate ${{ steps.apply.outputs.candidate_index }}"
+            echo "- Archive: ${{ steps.apply.outputs.archive_path }}"
+            echo "- Outcome marker: ${{ steps.apply.outputs.outcome_path }}"
+            echo
+            echo "Operator review is still required before merge."
+          } > /tmp/xyz-master-pr-body.md
+          gh pr create \
+            --base main \
+            --head "${{ steps.branch.outputs.branch }}" \
+            --title "XYZ_MASTER_SERVICE: propose ${{ steps.apply.outputs.tracker_id }} filing" \
+            --body-file /tmp/xyz-master-pr-body.md

@@ -1,0 +1,96 @@
+name: <PILOT_NAME> Runbook Archive Companion (Advisory)
+
+# XYZ-PILOT-192 — CI backstop for CLAUDE.md Rule #10 (XYZ-PILOT-167) runbook-class
+# archive discipline. Catches "structural rewrite of a runbook-class doc
+# without paired docs/archive/<basename>_*.md companion in same PR" at PR-time.
+#
+# Per XYZ-PILOT-198 advisory failure-email discipline: job-level
+# continue-on-error: true → failures surface as warnings in run page +
+# step summary + workflow_health rollup, but no failure-notification email.
+#
+# Per XYZ-PILOT-199: pull_request-only trigger (no push:) — fires on the
+# cumulative PR diff so multi-commit PRs that split runbook rewrite from
+# archive snapshot across commits still pass.
+
+on:
+  pull_request:
+    paths:
+      - 'CLAUDE.md'
+      - 'AGENTS.md'
+      - 'docs/30-runbooks/**/*RUNBOOK*.md'
+      - 'docs/30-runbooks/mcp/XYZ_PILOT_MCP_CLIENT*.md'
+      - 'docs/30-runbooks/security/XYZ_PILOT_CREDENTIALS.md'
+      - 'docs/00-live-status/XYZ_PILOT_LIVE_RUNBOOK.md'
+      - 'docs/30-runbooks/ui/XYZ_PILOT_STREAMLIT_VISUALS.md'
+  workflow_dispatch:
+    inputs:
+      base:
+        description: Base git ref for diff (default merge-base origin/main)
+        required: false
+        default: ''
+      head:
+        description: Head git ref for diff
+        required: false
+        default: HEAD
+      threshold:
+        description: Deletion threshold per runbook
+        required: false
+        default: '50'
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: xyz-pilot-runbook-archive-companion-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  runbook-archive-companion:
+    name: Runbook archive companion check
+    runs-on: ubuntu-latest
+    # XYZ-PILOT-198: advisory workflow — job-level continue-on-error so failures
+    # surface as warnings in the run page + step summary but do NOT fire a
+    # GitHub failure-notification email. Advisory checks are signal, not gate.
+    continue-on-error: true
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Resolve diff range
+        id: range
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            base="${{ inputs.base }}"
+            head="${{ inputs.head }}"
+            if [ -z "$base" ]; then
+              base="$(git merge-base HEAD origin/main 2>/dev/null || echo HEAD~1)"
+            fi
+          else
+            base="$(git merge-base HEAD origin/main 2>/dev/null || echo HEAD~1)"
+            head=HEAD
+          fi
+          echo "base=${base}" >> "${GITHUB_OUTPUT}"
+          echo "head=${head}" >> "${GITHUB_OUTPUT}"
+
+      - name: Self-test the checker
+        run: python3 scripts/check_runbook_archive_companion.py --self-test
+
+      - name: Runbook archive companion check
+        run: |
+          set -euo pipefail
+          THRESHOLD="${{ inputs.threshold }}"
+          THRESHOLD="${THRESHOLD:-50}"
+          python3 scripts/check_runbook_archive_companion.py \
+            --base "${{ steps.range.outputs.base }}" \
+            --head "${{ steps.range.outputs.head }}" \
+            --threshold "${THRESHOLD}" \
+            --github-summary

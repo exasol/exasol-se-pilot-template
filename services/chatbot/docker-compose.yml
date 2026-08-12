@@ -1,0 +1,75 @@
+name: xyz-chatbot
+
+services:
+  # XYZ-PILOT-085: service key renamed `chatbot` → `xyz-chatbot` so the
+  # docker-compose service name matches the `xyz-*` prefix every other
+  # container uses (xyz-grafana, xyz-mcp-internal, xyz-prometheus, …).
+  # Container_name stays `xyz-pilot-chatbot` because subscriber-visible
+  # URLs + Operator Dashboard `ServiceURIs` table depend on it.
+  xyz-chatbot:
+    build:
+      context: .
+      args:
+        XYZ_LAST_DEPLOYMENT_ISSUE: ${XYZ_LAST_DEPLOYMENT_ISSUE:-XYZ-PILOT-288}
+        XYZ_BUILD_AT_UTC: ${XYZ_BUILD_AT_UTC:-not-stamped}
+        XYZ_DEPLOYED_AT_UTC: ${XYZ_DEPLOYED_AT_UTC:-not-stamped}
+    image: xyz-pilot-chatbot:latest
+    container_name: xyz-pilot-chatbot
+    restart: unless-stopped
+    # The chatbot's chart-SQL path (_run_sql_for_chart) connects to Exasol on the
+    # host directly via EXA_DSN=host.docker.internal:8563, so it needs the
+    # host-gateway mapping. The mcp-internal sidecar had it but this service did
+    # not, so chart SQL failed with "Could not resolve IP address of hostname
+    # [host.docker.internal]".
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    env_file:
+      - .env
+      # XYZ-PILOT-053: same DB creds the mcp-internal sidecar uses, so the
+      # chatbot's exasol_query tool can talk to Exasol directly via pyexasol.
+      - /opt/xyz-chatbot/mcp-internal.env
+    environment:
+      AWS_REGION: <AWS_REGION>
+      HISTORY_DIR: /data/history
+      MCP_INTERNAL_URL: "http://mcp-internal:8000/mcp"
+    # IAM-driven AWS access via the EC2 instance profile —
+    # bedrock:InvokeModel + ssm:GetParameter + kms:Decrypt granted there.
+    # No AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY in this stack.
+    volumes:
+      # XYZ-PILOT-051: per-user query history persists across container rebuilds.
+      # Last 10 prompts per email, JSON file per user.
+      - /opt/xyz-chatbot/history:/data/history
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8501/_stcore/health',timeout=3).read()==b'ok' else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 25s
+
+  # XYZ-PILOT-053: internal-only Exasol MCP for the chatbot to call.
+  # No --no-auth flag would default to stdio; we want HTTP streamable.
+  # No FASTMCP_SERVER_AUTH_* env vars → server runs unauthenticated.
+  # Not exposed to host or via cloudflared — only reachable from the
+  # chatbot service over the docker bridge network.
+  mcp-internal:
+    image: exadockerci4/exasol-mcp-server:1.7.0
+    container_name: xyz-mcp-internal
+    restart: unless-stopped
+    env_file:
+      - /opt/xyz-chatbot/mcp-internal.env  # DB connection only, no FASTMCP_SERVER_AUTH_*
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: ["--host", "0.0.0.0", "--port", "8000", "--no-auth"]
+    expose:
+      - "8000"
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: xyz-chatbot-cloudflared
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml run
+    volumes:
+      - /opt/xyz-chatbot/cloudflared:/etc/cloudflared:ro
+    depends_on:
+      - xyz-chatbot

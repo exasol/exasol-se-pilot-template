@@ -1,0 +1,61 @@
+name: <PILOT_NAME> Repo Hygiene (Advisory)
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: xyz-pilot-repo-hygiene-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  hygiene:
+    name: Repository hygiene checks
+    runs-on: ubuntu-latest
+    # XYZ-PILOT-198: advisory workflow — job-level continue-on-error so failures
+    # surface as warnings in the run page + step summary but do NOT fire a
+    # GitHub failure-notification email. Advisory checks are signal, not gate.
+    continue-on-error: true
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Compile hygiene scripts
+        run: |
+          set -euo pipefail
+          python3 -m py_compile \
+            scripts/check_github_actions_e2e.py \
+            scripts/check_github_workflow_policy.py \
+            scripts/check_xyz_issue_links.py \
+            scripts/check_repo_retention_candidates.py \
+            scripts/check_skill_frontmatter.py \
+            scripts/check_tracked_docs.py \
+            scripts/check_tracker_major_defects.py \
+            scheduler/daily_status.py
+
+      - name: Verify tracker completeness
+        run: ./scripts/verify_tracker_completeness.sh
+
+      - name: Validate local skill frontmatter
+        run: python3 scripts/check_skill_frontmatter.py
+
+      - name: Verify daily-status documentation freshness coverage
+        run: python3 scripts/check_tracked_docs.py
+
+      - name: Verify XYZ issue tracker links
+        run: python3 scripts/check_xyz_issue_links.py
+
+      - name: Report repository retention cleanup candidates
+        run: python3 scripts/check_repo_retention_candidates.py --max-files 5 --max-dirs 8 >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Check GitHub workflow policy
+        run: python3 scripts/check_github_workflow_policy.py --github-warnings

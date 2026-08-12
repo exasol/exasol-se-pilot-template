@@ -1,0 +1,60 @@
+name: <PILOT_NAME> Actions Usage Watch (Advisory)
+
+on:
+  # Template safety: generated projects may re-enable this schedule after
+  # deciding their Actions budget and reporting cadence.
+  # schedule:
+  #   - cron: "30 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      lookback_days:
+        description: Number of days of workflow history to summarize
+        required: false
+        default: "14"
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: xyz-pilot-actions-usage-watch
+  cancel-in-progress: false
+
+jobs:
+  usage-watch:
+    name: GitHub Actions usage watch
+    runs-on: ubuntu-latest
+    # XYZ-PILOT-198: advisory workflow — job-level continue-on-error so failures
+    # surface as warnings in the run page + step summary but do NOT fire a
+    # GitHub failure-notification email. Advisory checks are signal, not gate.
+    continue-on-error: true
+    timeout-minutes: 8
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+
+      - name: Compile usage checker
+        run: python3 -m py_compile scripts/check_github_actions_usage.py
+
+      - name: Run usage watch
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            lookback_days="${{ inputs.lookback_days }}"
+          else
+            lookback_days="14"
+          fi
+          python3 scripts/check_github_actions_usage.py \
+            --repo "${GITHUB_REPOSITORY}" \
+            --lookback-days "${lookback_days}" \
+            --warn-minutes 500 \
+            --warn-artifact-mb 1024 \
+            --warn-cache-mb 1024 \
+            --warn-failure-rate 25 \
+            --github-summary \
+            --github-warnings

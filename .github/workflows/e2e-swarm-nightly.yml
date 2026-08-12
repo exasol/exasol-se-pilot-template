@@ -1,0 +1,316 @@
+name: <PILOT_NAME> E2E Swarm Nightly
+
+on:
+  # Template safety: generated projects may re-enable this schedule after AWS
+  # account, role, instance, recipient, and cost posture are configured.
+  # schedule:
+  #   - cron: "30 20 * * *"
+  workflow_dispatch:
+    inputs:
+      stress_users:
+        description: "XYZ_STRESS UI+DB virtual users; scheduled default 10, approved manual maximum 50"
+        required: false
+        default: "10"
+      force_run:
+        description: "Run even if EC2 state/status checks are not fully green"
+        required: false
+        default: "false"
+      dry_run:
+        description: "Validate schedule prerequisites but do not run the swarm or send email"
+        required: false
+        default: "false"
+      tester_agents:
+        description: "Space-separated base agents (blank = canonical 6)"
+        required: false
+        default: ""
+      include_stress:
+        description: "Include XYZ_STRESS"
+        type: boolean
+        default: true
+      include_regression:
+        description: "Include XYZ_REGRESSION"
+        type: boolean
+        default: true
+      include_infrastructure:
+        description: "Include XYZ_INFRASTRUCTURE"
+        type: boolean
+        default: true
+      session_hold_seconds:
+        description: "XYZ_STRESS session-hold seconds"
+        required: false
+        default: "20"
+      notify:
+        description: "Email results to OPS_ONLY after the run"
+        type: boolean
+        default: true
+
+permissions:
+  actions: read
+  contents: write
+  id-token: write
+
+concurrency:
+  group: xyz-pilot-e2e-swarm-nightly
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: <AWS_REGION>
+  ROLE_TO_ASSUME: <AWS_ARN><AWS_ACCOUNT_ID>:role/xyz-pilot-github-e2e-swarm
+  EC2_INSTANCE_ID: <EC2_INSTANCE_ID>
+  XYZ_REGION: <AWS_REGION>
+  XYZ_EC2_INSTANCE_ID: <EC2_INSTANCE_ID>
+  XYZ_REPO_BACKUP_BUCKET: xyz-pilot-repo-backups-<AWS_ACCOUNT_ID>
+  EXASOL_HOST: <EXASOL_HOSTNAME>
+  EXAPUMP_VERSION: "0.9.0"
+  EXAPUMP_LINUX_X86_64_SHA256: d568a6d80dbc4e6da77b18969ed1de73ebedcc75ac57087144e0fe21b7ecb962
+  STRESS_USERS: ${{ github.event_name == 'workflow_dispatch' && inputs.stress_users || '10' }}
+  FORCE_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.force_run || 'false' }}
+  DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
+  TESTER_AGENTS: ${{ github.event_name == 'workflow_dispatch' && inputs.tester_agents || '' }}
+  INC_STRESS: ${{ (github.event_name != 'workflow_dispatch' || inputs.include_stress) && '1' || '0' }}
+  INC_REGRESSION: ${{ (github.event_name != 'workflow_dispatch' || inputs.include_regression) && '1' || '0' }}
+  INC_INFRA: ${{ (github.event_name != 'workflow_dispatch' || inputs.include_infrastructure) && '1' || '0' }}
+  SESSION_HOLD: ${{ github.event_name == 'workflow_dispatch' && inputs.session_hold_seconds || '20' }}
+  NOTIFY: ${{ (github.event_name != 'workflow_dispatch' || inputs.notify) && '1' || '0' }}
+
+jobs:
+  e2e-swarm:
+    name: Full E2E Tester Swarm
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.XYZ_MASTER_SERVICE_TOKEN || github.token }}
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ env.ROLE_TO_ASSUME }}
+          role-session-name: xyz-pilot-e2e-swarm-${{ github.run_id }}
+
+      - name: Check Pilot runtime is up
+        id: runtime
+        run: |
+          set -euo pipefail
+
+          state="$(
+            aws ec2 describe-instances \
+              --region "${AWS_REGION}" \
+              --instance-ids "${EC2_INSTANCE_ID}" \
+              --query 'Reservations[0].Instances[0].State.Name' \
+              --output text \
+              --no-cli-pager
+          )"
+          checks="$(
+            aws ec2 describe-instance-status \
+              --region "${AWS_REGION}" \
+              --instance-ids "${EC2_INSTANCE_ID}" \
+              --include-all-instances \
+              --query 'InstanceStatuses[0].{Instance:InstanceStatus.Status,System:SystemStatus.Status}' \
+              --output json \
+              --no-cli-pager
+          )"
+          instance_status="$(python3 -c 'import json,sys; d=json.loads(sys.argv[1] or "{}"); print(d.get("Instance","missing"))' "${checks}")"
+          system_status="$(python3 -c 'import json,sys; d=json.loads(sys.argv[1] or "{}"); print(d.get("System","missing"))' "${checks}")"
+
+          should_run="true"
+          reason="runtime green"
+          if [ "${state}" != "running" ] || [ "${instance_status}" != "ok" ] || [ "${system_status}" != "ok" ]; then
+            should_run="false"
+            reason="EC2 state=${state}, instance=${instance_status}, system=${system_status}"
+          fi
+          if [ "${FORCE_RUN}" = "true" ]; then
+            should_run="true"
+            reason="force_run=true (${reason})"
+          fi
+
+          {
+            echo "should_run=${should_run}"
+            echo "state=${state}"
+            echo "instance_status=${instance_status}"
+            echo "system_status=${system_status}"
+            echo "reason=${reason}"
+          } >> "${GITHUB_OUTPUT}"
+
+          {
+            echo "## <PILOT_NAME> E2E Swarm Nightly"
+            echo
+            echo "- EC2 state: \`${state}\`"
+            echo "- Instance status: \`${instance_status}\`"
+            echo "- System status: \`${system_status}\`"
+            echo "- Decision: \`${should_run}\`"
+            echo "- Reason: ${reason}"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Stop if runtime is down
+        if: steps.runtime.outputs.should_run != 'true'
+        run: |
+          set -euo pipefail
+          echo "Pilot environment is not up; skipping full E2E swarm and notification."
+
+      - name: Install runtime tooling
+        if: steps.runtime.outputs.should_run == 'true'
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet boto3==1.43.* pyexasol==2.2.1
+          sudo apt-get update -y
+          sudo apt-get install -y ripgrep jq
+
+          mkdir -p "${HOME}/.local/bin"
+          curl -fSL \
+            "https://github.com/exasol-labs/exapump/releases/download/v${EXAPUMP_VERSION}/exapump-${EXAPUMP_VERSION}-linux-x86_64" \
+            -o /tmp/exapump
+          printf '%s  %s\n' "${EXAPUMP_LINUX_X86_64_SHA256}" /tmp/exapump | sha256sum -c -
+          install -m 0755 /tmp/exapump "${HOME}/.local/bin/exapump"
+          echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
+
+      - name: Configure Git push token and Exasol read-only profile
+        if: steps.runtime.outputs.should_run == 'true'
+        env:
+          ARCHIVE_PUSH_TOKEN: ${{ secrets.XYZ_MASTER_SERVICE_TOKEN }}
+        run: |
+          set -euo pipefail
+          export PATH="${HOME}/.local/bin:${PATH}"
+
+          git_pat="${ARCHIVE_PUSH_TOKEN:-}"
+          if [ -z "${git_pat}" ]; then
+            git_pat="$(
+              aws ssm get-parameter \
+                --region "${AWS_REGION}" \
+                --name /xyz-pilot/chatbot/github-token \
+                --with-decryption \
+                --query Parameter.Value \
+                --output text \
+                --no-cli-pager
+            )"
+          fi
+          echo "::add-mask::${git_pat}"
+          git config user.name "xyz-pilot-e2e-swarm[bot]"
+          git config user.email "xyz-pilot-e2e-swarm[bot]@users.noreply.github.com"
+          git remote set-url origin "https://${git_pat}@github.com/${GITHUB_REPOSITORY}.git"
+          {
+            echo "GH_TOKEN=${git_pat}"
+            echo "GITHUB_TOKEN=${git_pat}"
+          } >> "${GITHUB_ENV}"
+
+          dash_password="$(
+            aws ssm get-parameter \
+              --region "${AWS_REGION}" \
+              --name /xyz-pilot/secrets/exasol-xyz-dash \
+              --with-decryption \
+              --query Parameter.Value \
+              --output text \
+              --no-cli-pager
+          )"
+          echo "::add-mask::${dash_password}"
+          {
+            echo "XYZ_EXASOL_DSN=${EXASOL_HOST}:8563"
+            echo "XYZ_EXASOL_USER=XYZ_DASH"
+            echo "XYZ_EXASOL_SCHEMA=<PILOT_SCHEMA>"
+            echo "XYZ_EXASOL_PASSWORD=${dash_password}"
+          } >> "${GITHUB_ENV}"
+          exapump profile remove xyz-pilot-ro >/dev/null 2>&1 || true
+          exapump profile add xyz-pilot-ro \
+            --host "${EXASOL_HOST}" \
+            --port 8563 \
+            --user XYZ_DASH \
+            --password "${dash_password}" \
+            --schema <PILOT_SCHEMA> \
+            --tls true \
+            --validate-certificate false \
+            --default
+
+          # XYZ-PILOT-291 residual (a): wire the XYZ_BIZ exapump profile so the
+          # nightly swarm exercises the per-profile BIZ dimension. Fully guarded
+          # and best-effort — if the secret is unavailable or the profile add
+          # fails, XYZ_SWARM_BIZ_PROFILE is left empty so run_e2e_swarm.sh / the
+          # XYZ_STRESS preflight disable BIZ and the swarm runs XYZ_DASH only
+          # (never a nightly regression). No --schema: XYZ_BIZ has no <PILOT_SCHEMA>
+          # base access and the BIZ queries are fully schema-qualified.
+          biz_password="$(
+            aws ssm get-parameter \
+              --region "${AWS_REGION}" \
+              --name /xyz-pilot/secrets/exasol-xyz-biz \
+              --with-decryption \
+              --query Parameter.Value \
+              --output text \
+              --no-cli-pager 2>/dev/null || true
+          )"
+          if [ -n "${biz_password}" ] && [ "${biz_password}" != "None" ]; then
+            echo "::add-mask::${biz_password}"
+            exapump profile remove xyz-pilot-biz >/dev/null 2>&1 || true
+            if exapump profile add xyz-pilot-biz \
+                 --host "${EXASOL_HOST}" --port 8563 --user XYZ_BIZ \
+                 --password "${biz_password}" --tls true --validate-certificate false; then
+              echo "XYZ_SWARM_BIZ_PROFILE=xyz-pilot-biz" >> "${GITHUB_ENV}"
+              echo "wired xyz-pilot-biz profile; swarm BIZ dimension enabled"
+            else
+              echo "XYZ_SWARM_BIZ_PROFILE=" >> "${GITHUB_ENV}"
+              echo "xyz-pilot-biz profile add failed; swarm BIZ dimension disabled (XYZ_DASH only)"
+            fi
+          else
+            echo "XYZ_SWARM_BIZ_PROFILE=" >> "${GITHUB_ENV}"
+            echo "xyz-pilot-biz secret unavailable; swarm BIZ dimension disabled (XYZ_DASH only)"
+          fi
+          unset git_pat dash_password biz_password
+
+      - name: Dry-run stop before swarm execution
+        if: steps.runtime.outputs.should_run == 'true' && env.DRY_RUN == 'true'
+        run: |
+          set -euo pipefail
+          echo "Dry run requested; prerequisites passed. Not running the swarm and not sending email."
+
+      - name: Run full E2E swarm with XYZ_STRESS + XYZ_REGRESSION
+        if: steps.runtime.outputs.should_run == 'true' && env.DRY_RUN != 'true'
+        env:
+          XYZ_E2E_AWS_PROFILE_MODE: oidc
+          XYZ_TESTER_AGENTS: ${{ env.TESTER_AGENTS }}
+          XYZ_INCLUDE_STRESS: ${{ env.INC_STRESS }}
+          XYZ_INCLUDE_REGRESSION: ${{ env.INC_REGRESSION }}
+          XYZ_INCLUDE_INFRASTRUCTURE: ${{ env.INC_INFRA }}
+          XYZ_STRESS_USERS: ${{ env.STRESS_USERS }}
+          XYZ_STRESS_REQUIRE_SESSION_HOLD: "1"
+          XYZ_STRESS_SESSION_HOLD_SECONDS: ${{ env.SESSION_HOLD }}
+          XYZ_E2E_NOTIFY: ${{ env.NOTIFY }}
+          XYZ_INFRA_TARGET_PROFILE: env
+          XYZ_INFRA_SOURCE_LIVE_CHECKS: "0"
+          XYZ_INFRA_TARGET_BACKUP_BUCKET: ${{ env.XYZ_REPO_BACKUP_BUCKET }}
+          XYZ_E2E_NOTIFY_SES_REGION: ${{ env.AWS_REGION }}
+          XYZ_E2E_ARCHIVE_COAUTHOR: "Co-Authored-By: GitHub Actions <<OPERATOR_EMAIL>>"
+        run: |
+          set -euo pipefail
+          export PATH="${HOME}/.local/bin:${PATH}"
+          if [[ "${STRESS_USERS}" =~ ^[0-9]+$ ]] && [ "${STRESS_USERS}" -gt 10 ]; then
+            echo "XYZ_STRESS_ALLOW_HIGHER=1" >> "${GITHUB_ENV}"
+            export XYZ_STRESS_ALLOW_HIGHER=1
+          fi
+          run_id="$(date -u +'%Y-%m-%dT%H%M%SZ')"
+          echo "run_id=${run_id}" >> "${GITHUB_ENV}"
+          tests/scripts/run_e2e_swarm.sh "${run_id}"
+
+      - name: Summarize run
+        if: always() && steps.runtime.outputs.should_run == 'true' && env.DRY_RUN != 'true'
+        run: |
+          set -euo pipefail
+          if [ -n "${run_id:-}" ] && [ -f "tests/logs/runs/${run_id}/manifest.md" ]; then
+            {
+              echo "## Archived E2E swarm run"
+              echo
+              echo "- Run ID: \`${run_id}\`"
+              echo "- Runtime folder: [tests/logs/runs/${run_id}/](https://github.com/${GITHUB_REPOSITORY}/tree/main/tests/logs/runs/${run_id}/)"
+              echo
+              sed -n '/## Exit Codes/,$p' "tests/logs/runs/${run_id}/manifest.md"
+            } >> "${GITHUB_STEP_SUMMARY}"
+          else
+            echo "No run manifest found." >> "${GITHUB_STEP_SUMMARY}"
+          fi

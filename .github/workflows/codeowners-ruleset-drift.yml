@@ -1,0 +1,43 @@
+name: <PILOT_NAME> CODEOWNERS Drift (Advisory)
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/CODEOWNERS"
+      - ".github/rulesets/**"
+      - ".github/workflows/codeowners-ruleset-drift.yml"
+      - "docs/30-runbooks/github/XYZ_PILOT_GITHUB_RUNBOOK.md"
+      - "docs/XYZ_PILOT_ISSUE_TRACKER.md"
+      - "scripts/check_codeowners_ruleset_drift.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: xyz-pilot-codeowners-drift-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  drift:
+    name: CODEOWNERS and ruleset drift check
+    runs-on: ubuntu-latest
+    # XYZ-PILOT-198: advisory workflow — job-level continue-on-error so failures
+    # surface as warnings in the run page + step summary but do NOT fire a
+    # GitHub failure-notification email. Advisory checks are signal, not gate.
+    continue-on-error: true
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+
+      - name: Compile drift checker
+        run: python3 -m py_compile scripts/check_codeowners_ruleset_drift.py
+
+      - name: Run CODEOWNERS and ruleset drift check
+        run: python3 scripts/check_codeowners_ruleset_drift.py --github-summary

@@ -1,0 +1,32 @@
+[Unit]
+Description=<PILOT_NAME> — Exasol Personal cache warm-up (XYZ-PILOT-059)
+Documentation=https://github.com/<GITHUB_OWNER>/<PROJECT_SLUG>/blob/main/scripts/exasol_warmup/README.md
+
+# exasol_launcher.target signals that the Exasol DB is up and serving.
+# Wait for it before issuing the warm-up queries.
+After=exasol_launcher.target docker.service
+Wants=exasol_launcher.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=no
+ExecStart=/opt/xyz-warmup/run_warmup.sh
+
+# Upper bound — the script's own wait loop tolerates 5 minutes of Exasol
+# not-yet-ready (60 × 5 s) plus the queries. XYZ-PILOT-292 raised this 600→900
+# as a belt after a cold V_* tail timed the unit out at Result=timeout; the
+# real fix is the trimmed/budgeted/best-effort V_* phase in warmup.py.
+TimeoutStartSec=900
+
+# Don't restart on failure — the next boot will try again. A persistent
+# failure surfaces as a stale /var/log/xyz-warmup.log and a journal entry.
+Restart=no
+
+# Run as root so we can write /var/log/xyz-warmup.log and read
+# /opt/xyz-chatbot/mcp-internal.env (mode 640, root-owned).
+User=root
+Group=root
+
+[Install]
+WantedBy=multi-user.target

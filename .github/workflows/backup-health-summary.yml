@@ -1,0 +1,93 @@
+name: <PILOT_NAME> Backup Health Summary (Advisory)
+
+on:
+  # Template safety: generated projects may re-enable this schedule after repo
+  # backup automation is configured and running.
+  # schedule:
+  #   - cron: "30 3 * * *"
+  #   - cron: "30 9,13,17 * * 1-5"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  id-token: write
+
+concurrency:
+  group: xyz-pilot-backup-health-summary
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: <AWS_REGION>
+  BACKUP_BUCKET: xyz-pilot-repo-backups-<AWS_ACCOUNT_ID>
+  ROLE_TO_ASSUME: <AWS_ARN><AWS_ACCOUNT_ID>:role/xyz-pilot-github-repo-backup
+  REPOSITORY_NAME: <PROJECT_SLUG>
+
+jobs:
+  backup-health:
+    name: Backup health summary
+    runs-on: ubuntu-latest
+    # XYZ-PILOT-198: advisory workflow — job-level continue-on-error so failures
+    # surface as warnings in the run page + step summary but do NOT fire a
+    # GitHub failure-notification email. Advisory checks are signal, not gate.
+    continue-on-error: true
+    timeout-minutes: 8
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ env.ROLE_TO_ASSUME }}
+          role-session-name: xyz-pilot-backup-health-${{ github.run_id }}
+
+      - name: Fetch latest backup metadata
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/xyz-backup-health
+          aws s3 cp \
+            "s3://${BACKUP_BUCKET}/latest/latest.json" \
+            /tmp/xyz-backup-health/latest.json \
+            --only-show-errors
+          aws s3api head-object \
+            --bucket "${BACKUP_BUCKET}" \
+            --key "latest/latest.json" \
+            > /tmp/xyz-backup-health/latest-head.json
+          aws s3api head-object \
+            --bucket "${BACKUP_BUCKET}" \
+            --key "latest/${REPOSITORY_NAME}.git.tar.gz" \
+            > /tmp/xyz-backup-health/archive-head.json
+          aws s3api head-object \
+            --bucket "${BACKUP_BUCKET}" \
+            --key "latest/${REPOSITORY_NAME}.git.tar.gz.sha256" \
+            > /tmp/xyz-backup-health/checksum-head.json
+
+      - name: Fetch recent backup workflow runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh run list \
+            --workflow repo-backup.yml \
+            --branch main \
+            --limit 20 \
+            --json databaseId,status,conclusion,headSha,createdAt,updatedAt,url \
+            > /tmp/xyz-backup-health/backup-runs.json
+
+      - name: Validate backup health
+        run: |
+          set -euo pipefail
+          python3 scripts/check_repo_backup_health.py \
+            --bucket "${BACKUP_BUCKET}" \
+            --manifest-json /tmp/xyz-backup-health/latest.json \
+            --manifest-head-json /tmp/xyz-backup-health/latest-head.json \
+            --archive-head-json /tmp/xyz-backup-health/archive-head.json \
+            --checksum-head-json /tmp/xyz-backup-health/checksum-head.json \
+            --workflow-runs-json /tmp/xyz-backup-health/backup-runs.json \
+            --max-age-hours 30 \
+            --github-summary

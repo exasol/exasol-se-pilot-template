@@ -1,0 +1,40 @@
+apiVersion: 1
+
+datasources:
+  - name: Exasol XYZ (via proxy)
+    type: yesoreyeram-infinity-datasource
+    uid: exasol_xyz
+    access: proxy
+    url: http://exasol_proxy:8000
+    isDefault: true
+    editable: false
+    basicAuth: false
+    jsonData:
+      global_queries:
+        - name: dummy
+          id: dummy
+          query:
+            type: json
+            source: url
+      tlsSkipVerify: true
+      customHealthCheckEnabled: true
+      customHealthCheckUrl: http://exasol_proxy:8000/health
+      auth_method: bearerToken
+      # Required for operator click-through links such as
+      # /api/datasources/proxy/uid/exasol_xyz/license/export.
+      # The Infinity bearerToken setting covers panel queries; Grafana's
+      # generic datasource proxy uses the standard httpHeaderName*/Value* pair.
+      httpHeaderName1: Authorization
+      allowedHosts:
+        - http://exasol_proxy:8000
+    secureJsonData:
+      bearerToken: ${PROXY_TOKEN}
+      httpHeaderValue1: Bearer ${PROXY_TOKEN}
+
+  - name: Prometheus
+    type: prometheus
+    uid: xyz_prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: false
+    editable: false

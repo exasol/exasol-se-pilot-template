@@ -1,0 +1,122 @@
+name: <PILOT_NAME> Tracker Major Defect Heads-Up
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - docs/XYZ_PILOT_ISSUE_TRACKER.md
+  workflow_dispatch:
+    inputs:
+      base:
+        description: Base git ref for tracker diff classification
+        required: false
+        default: HEAD~1
+      head:
+        description: Head git ref for tracker diff classification
+        required: false
+        default: HEAD
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: <AWS_REGION>
+  ROLE_TO_ASSUME: <AWS_ARN><AWS_ACCOUNT_ID>:role/xyz-pilot-github-heads-up-ses
+  SES_SOURCE: <OPERATOR_EMAIL>
+
+concurrency:
+  group: xyz-pilot-tracker-heads-up-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  classify:
+    name: Classify critical and major tracker defects
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Select tracker diff range
+        id: range
+        run: |
+          set -euo pipefail
+          skip=false
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            base="${{ inputs.base }}"
+            head="${{ inputs.head }}"
+          else
+            base="${{ github.event.before }}"
+            head="${{ github.sha }}"
+            # Guard against history rewrites / new-branch pushes. A force-push leaves
+            # github.event.before pointing at an orphaned commit absent from the rewritten
+            # history; diffing against a missing base makes the classifier treat the ENTIRE
+            # major/critical backlog as newly-filed and re-blasts one email per ticket to the
+            # OPS-ONLY list (incident 2026-06-15: 8 false-alarm emails after a secret-scrub
+            # force-push, XYZ-PILOT-NNN). When base is a force-push, all-zero, missing, or not an
+            # ancestor of head, skip the SES blast (classification still runs for the summary).
+            if [ "${{ github.event.forced }}" = "true" ]; then skip=true; fi
+            if [ "${base}" = "0000000000000000000000000000000000000000" ]; then skip=true; fi
+            if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then skip=true; fi
+            if [ "${skip}" = "false" ] && ! git merge-base --is-ancestor "${base}" "${head}" 2>/dev/null; then skip=true; fi
+          fi
+          echo "base=${base}" >> "${GITHUB_OUTPUT}"
+          echo "head=${head}" >> "${GITHUB_OUTPUT}"
+          echo "skip=${skip}" >> "${GITHUB_OUTPUT}"
+          if [ "${skip}" = "true" ]; then
+            echo "::notice::Tracker heads-up SES blast skipped — diff base '${base}' is a force-push/orphan/non-ancestor; not re-classifying the full backlog."
+          fi
+
+      - name: Validate proposed subject format
+        run: python3 scripts/check_tracker_major_defects.py --self-test
+
+      - name: Classify critical and major heads-up candidates
+        id: classify
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/xyz-heads-up-ses
+          ses_args=()
+          if [ "${{ github.event_name }}" = "push" ] && [ "${{ steps.range.outputs.skip }}" != "true" ]; then
+            ses_args=(
+              --ses-output-dir /tmp/xyz-heads-up-ses
+              --ses-source "${SES_SOURCE}"
+              --ses-recipient "<OPERATOR_EMAIL>"
+              --ses-recipient "<OPS_USER_3_EMAIL>"
+              --ses-recipient "<OPS_USER_2_EMAIL>"
+            )
+          fi
+          python3 scripts/check_tracker_major_defects.py \
+            --base "${{ steps.range.outputs.base }}" \
+            --head "${{ steps.range.outputs.head }}" \
+            --github-summary \
+            "${ses_args[@]}"
+          count="$(find /tmp/xyz-heads-up-ses -maxdepth 1 -name '*.json' | wc -l | tr -d ' ')"
+          echo "email_count=${count}" >> "${GITHUB_OUTPUT}"
+
+      - name: Configure AWS credentials for SES
+        if: github.event_name == 'push' && steps.range.outputs.skip != 'true' && steps.classify.outputs.email_count != '0'
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          role-to-assume: ${{ env.ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: xyz-pilot-tracker-heads-up-${{ github.run_id }}
+
+      - name: Send one SES email per issue
+        if: github.event_name == 'push' && steps.range.outputs.skip != 'true' && steps.classify.outputs.email_count != '0'
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          for file in /tmp/xyz-heads-up-ses/*.json; do
+            aws ses send-email \
+              --region "${AWS_REGION}" \
+              --cli-input-json "file://${file}" \
+              --no-cli-pager > /tmp/xyz-heads-up-send-result.json
+            message_id="$(python3 -c 'import json; print(json.load(open("/tmp/xyz-heads-up-send-result.json")).get("MessageId", "<unknown>"))')"
+            issue_id="$(basename "${file}" .json)"
+            echo "Sent ${issue_id} as SES message ${message_id}"
+          done

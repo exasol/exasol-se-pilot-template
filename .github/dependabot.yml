@@ -1,0 +1,107 @@
+version: 2
+
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "08:30"
+      timezone: Europe/Berlin
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - github-actions
+      - XYZ-PILOT-153
+    commit-message:
+      prefix: deps(actions)
+
+  - package-ecosystem: docker
+    directory: /services/chatbot
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Europe/Berlin
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - docker
+      - XYZ-PILOT-153
+    commit-message:
+      prefix: deps(docker)
+
+  - package-ecosystem: docker
+    directory: /services/exasol-mcp
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:10"
+      timezone: Europe/Berlin
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - docker
+      - XYZ-PILOT-153
+    commit-message:
+      prefix: deps(docker)
+
+  - package-ecosystem: docker
+    directory: /services/streamlit-insights
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:20"
+      timezone: Europe/Berlin
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - docker
+      - XYZ-PILOT-153
+    commit-message:
+      prefix: deps(docker)
+
+  - package-ecosystem: docker
+    directory: /services/grafana/exasol_proxy
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:30"
+      timezone: Europe/Berlin
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - docker
+      - XYZ-PILOT-153
+    commit-message:
+      prefix: deps(docker)
+
+  - package-ecosystem: pip
+    directory: /services/streamlit-insights
+    schedule:
+      interval: weekly
+      day: monday
+      time: "10:00"
+      timezone: Europe/Berlin
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - python
+      - XYZ-PILOT-153
+    commit-message:
+      prefix: deps(python)
+
+  - package-ecosystem: pip
+    directory: /services/grafana/exasol_proxy
+    schedule:
+      interval: weekly
+      day: monday
+      time: "10:10"
+      timezone: Europe/Berlin
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - python
+      - XYZ-PILOT-153
+    commit-message:
+      prefix: deps(python)
