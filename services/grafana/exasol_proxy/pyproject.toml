@@ -6,5 +6,5 @@ requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115",
     "uvicorn>=0.32",
-    "pyexasol==2.3.1",
+    "pyexasol==2.4.1",
 ]
