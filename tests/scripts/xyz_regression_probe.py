@@ -21,7 +21,7 @@ Usage:
 Reads XYZ_DASH credentials from ~/.exapump/config.toml [xyz-pilot-ro]
 (same as chatbot_backend_stress.py). Bedrock region + model from env
 (XYZ_BEDROCK_REGION / XYZ_BEDROCK_MODEL_ID) default to
-<AWS_REGION> / us.anthropic.claude-sonnet-4-6 (matching the live chatbot
+<AWS_REGION> / eu.anthropic.claude-sonnet-4-6 (matching the live chatbot
 at services/chatbot/app.py after the 2026-06 AWS account/region migration).
 
 The RP suite is intentionally small + curated. Each prompt's assertion
@@ -46,7 +46,7 @@ import pyexasol
 
 EXAPUMP_PROFILE = "xyz-pilot-ro"
 AWS_REGION = os.environ.get("XYZ_BEDROCK_REGION", "<AWS_REGION>")
-BEDROCK_MODEL_ID = os.environ.get("XYZ_BEDROCK_MODEL_ID", "us.anthropic.claude-sonnet-4-6")
+BEDROCK_MODEL_ID = os.environ.get("XYZ_BEDROCK_MODEL_ID", "eu.anthropic.claude-sonnet-4-6")
 MAX_TOOL_ITERATIONS = int(os.environ.get("XYZ_CHATBOT_MAX_TOOL_ITERATIONS", "14"))
 
 # Minimal system prompt that mirrors the live chatbot's key guidance

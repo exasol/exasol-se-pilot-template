@@ -17,7 +17,7 @@ Usage:
 
 Reads XYZ_DASH credentials from ~/.exapump/config.toml [xyz-pilot-ro].
 Bedrock region/model from XYZ_BEDROCK_REGION / XYZ_BEDROCK_MODEL_ID env vars
-(defaults: <AWS_REGION> / us.anthropic.claude-sonnet-4-6).
+(defaults: <AWS_REGION> / eu.anthropic.claude-sonnet-4-6).
 """
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ import pyexasol
 
 EXAPUMP_PROFILE = "xyz-pilot-ro"
 AWS_REGION = os.environ.get("XYZ_BEDROCK_REGION", "<AWS_REGION>")
-BEDROCK_MODEL_ID = os.environ.get("XYZ_BEDROCK_MODEL_ID", "us.anthropic.claude-sonnet-4-6")
+BEDROCK_MODEL_ID = os.environ.get("XYZ_BEDROCK_MODEL_ID", "eu.anthropic.claude-sonnet-4-6")
 MAX_TOOL_ITERATIONS = int(os.environ.get("XYZ_CHATBOT_MAX_TOOL_ITERATIONS", "14"))
 SYSTEM_PROMPT = """You are a SQL agent for <PILOT_NAME>'s <PILOT_SCHEMA> schema on Exasol.
 For every question about the data, call the exasol_query tool with a SELECT.

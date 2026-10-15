@@ -262,7 +262,7 @@ def check_chatbot_target_runtime_baseline(errors: list[str]) -> None:
     app_text = app_path.read_text(encoding="utf-8")
     required_app = {
         "default AWS region": 'AWS_REGION         = os.environ.get("AWS_REGION", "<AWS_REGION>")' in app_text,
-        "default Bedrock model": 'BEDROCK_MODEL_ID", "us.anthropic.claude-sonnet-4-6"' in app_text,
+        "default Bedrock model": 'BEDROCK_MODEL_ID", "eu.anthropic.claude-sonnet-4-6"' in app_text,
         "target Cognito pool in self-description": "<COGNITO_USER_POOL_ID>" in app_text,
     }
     for label, ok in required_app.items():
@@ -273,7 +273,7 @@ def check_chatbot_target_runtime_baseline(errors: list[str]) -> None:
     policy_text = policy_path.read_text(encoding="utf-8")
     required_policy = {
         "target SSM account/region": "<AWS_ARN><AWS_REGION>:<AWS_ACCOUNT_ID>:parameter/xyz-pilot/*" in policy_text,
-        "target Bedrock inference profile": "<AWS_ARN>*:<AWS_ACCOUNT_ID>:inference-profile/us.anthropic.*" in policy_text,
+        "target Bedrock inference profile": "<AWS_ARN>*:<AWS_ACCOUNT_ID>:inference-profile/eu.anthropic.*" in policy_text,
         "Converse permission": '"bedrock:Converse"' in policy_text,
     }
     for label, ok in required_policy.items():

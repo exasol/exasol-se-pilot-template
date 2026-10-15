@@ -25,7 +25,7 @@ Streamlit chatbot container
    │
    ├──► AWS Cognito Hosted UI (SSO — same user pool as MCP server)
    │
-   ├──► Bedrock Claude Sonnet 4.6 — Converse API + tool-use (us.anthropic.… inference profile)
+   ├──► Bedrock Claude Sonnet 4.6 — Converse API + tool-use (eu.anthropic.… inference profile)
    │
    ├──► SSM Parameter Store → /xyz-pilot/github/service-token
    │      └──► GitHub Contents API (authenticated reads of the private repo,
@@ -97,7 +97,7 @@ Streamlit chatbot container
 
 | Pre-req | Resolution | Where |
 |---|---|---|
-| AWS Bedrock Sonnet 4.6 model access | ✅ XYZ-PILOT-257 | `us.anthropic.claude-sonnet-4-6` inference profile, ACTIVE in `<AWS_ACCOUNT_ID>/<AWS_REGION>` |
+| AWS Bedrock Sonnet 4.6 model access | ✅ XYZ-PILOT-257 | `eu.anthropic.claude-sonnet-4-6` inference profile, ACTIVE in `<AWS_ACCOUNT_ID>/<AWS_REGION>` |
 | GitHub PAT for repo writes | ✅ SSM SecureString | `/xyz-pilot/github/service-token` (uploaded via `scripts/upload_chatbot_pat.sh`) |
 | Cognito user pool with migrated subscribers | ✅ XYZ-PILOT-255 | `<COGNITO_USER_POOL_ID>` |
 | Cognito app client for chatbot | ✅ Recreated in target | `xyz-pilot-chatbot-client` |

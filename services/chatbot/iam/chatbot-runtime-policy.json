@@ -32,7 +32,7 @@
         "bedrock:ConverseStream"
       ],
       "Resource": [
-        "<AWS_ARN>*:<AWS_ACCOUNT_ID>:inference-profile/us.anthropic.*",
+        "<AWS_ARN>*:<AWS_ACCOUNT_ID>:inference-profile/eu.anthropic.*",
         "<AWS_ARN>*::foundation-model/anthropic.*"
       ]
     }

@@ -59,7 +59,7 @@ COGNITO_CLIENT_ID  = os.environ["COGNITO_CLIENT_ID"]
 COGNITO_CLIENT_SECRET = os.environ["COGNITO_CLIENT_SECRET"]
 APP_REDIRECT_URI   = os.environ["APP_REDIRECT_URI"]
 BEDROCK_MODEL_ID   = os.environ.get(
-    "BEDROCK_MODEL_ID", "us.anthropic.claude-sonnet-4-6",
+    "BEDROCK_MODEL_ID", "eu.anthropic.claude-sonnet-4-6",
 )
 GITHUB_REPO        = os.environ.get(
     "GITHUB_REPO", "<GITHUB_OWNER>/<PROJECT_SLUG>",
@@ -354,7 +354,7 @@ ABOUT YOURSELF (so you can answer questions about your own architecture without 
 You are XYZ-PILOT-043 Phase 1 (shipped 2026-05-20) + XYZ-PILOT-049 Phase 2 + XYZ-PILOT-053 Phase 3 (shipped 2026-05-21). Your stack:
   - Streamlit container running on the <PILOT_NAME> EC2 in /opt/xyz-chatbot/, exposed via a named Cloudflare tunnel at https://<PROJECT_SLUG>-chat.<PILOT_DOMAIN>
   - Sign-in via AWS Cognito Hosted UI (OAuth code flow), reusing the same <AWS_REGION> user pool <COGNITO_USER_POOL_ID> that the Pilot's MCP server uses — same credentials for both.
-  - LLM backend: AWS Bedrock **Converse API** with tool-use enabled, on the us.anthropic.claude-sonnet-4-6 inference profile in <AWS_REGION>.
+  - LLM backend: AWS Bedrock **Converse API** with tool-use enabled, on the eu.anthropic.claude-sonnet-4-6 inference profile in <AWS_REGION>.
   - Pilot context: a static digest of 12 curated narrative docs (~22 K tokens) fetched fresh from the private repo via the authenticated GitHub Contents API on first turn, cached 5 min in Streamlit session state. The 12 docs are: README, CLAUDE.md, XYZ_PILOT_DAILY_STATUS, XYZ_PILOT_ISSUE_TRACKER (top portion), XYZ_PILOT_PROGRESS_LOG (most-recent milestones), XYZ_PILOT_SCHEMA_MAPPING, XYZ_PILOT_LIVE_RUNBOOK, XYZ_PILOT_DEVELOPER_RUNBOOK, XYZ_PILOT_MCP_CLIENT_GUIDE, XYZ_PILOT_MCP_PRODUCTION_HARDENING, XYZ_PILOT_CREDENTIALS, and sample_schema_assets/migration_report.
   - **Phase 2 tools (XYZ-PILOT-049):** for anything outside the 12-file digest you can call `read_repo_file(path, max_chars=20000)` to pull ANY file from the private repo, and `list_repo_directory(path)` to navigate. Guardrails block `.env`, `*.pem`, `*.key`, `secrets.json`, `node_access*`, plus path traversal. Tool-call ceiling defaults to 14 calls per user turn and can be tuned by the operator. A checkpoint after 6 calls asks you to stop exploring and answer from partial evidence unless one more tool call is essential.
   - **Phase 3 tools (XYZ-PILOT-053):** live Exasol DB access via two complementary surfaces:
