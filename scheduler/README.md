@@ -301,7 +301,7 @@ content. Policy and local scanner commands live in
 The daily-status Lambda's GitHub-backed sections read the PAT from AWS Secrets
 Manager secret `GITHUB_TOKEN_SECRET_ID` (default:
 `xyz-pilot/github/service-token`). The legacy SSM SecureString named by
-`GITHUB_TOKEN_PARAM` (default: `/xyz-pilot/chatbot/github-token`) remains a
+`GITHUB_TOKEN_PARAM` (default: `/xyz-pilot/github/service-token`) remains a
 temporary rollback fallback. The Lambda environment must not carry the PAT value
 itself as `GITHUB_TOKEN`. Since
 [XYZ-PILOT-210](../docs/XYZ_PILOT_ISSUE_TRACKER.md), the token must
@@ -348,7 +348,7 @@ AWS_PROFILE=default AWS_REGION=<AWS_REGION> \
 
 AWS_PROFILE=default AWS_REGION=<AWS_REGION> \
   aws ssm describe-parameters \
-    --parameter-filters Key=Name,Option=Equals,Values=/xyz-pilot/chatbot/github-token \
+    --parameter-filters Key=Name,Option=Equals,Values=/xyz-pilot/github/service-token \
     --query 'Parameters[].{Name:Name,Type:Type,KeyId:KeyId}' \
     --output table
 

@@ -979,7 +979,7 @@ def _action_invite_user(email: str, event: dict[str, Any]) -> dict[str, Any]:
 
 GITHUB_REPO = os.environ.get("GITHUB_REPO", "<GITHUB_OWNER>/<PROJECT_SLUG>")
 GITHUB_TOKEN_SECRET_ID = os.environ.get("GITHUB_TOKEN_SECRET_ID", "xyz-pilot/github/service-token")
-GITHUB_TOKEN_PARAM = os.environ.get("GITHUB_TOKEN_PARAM", "/xyz-pilot/chatbot/github-token")
+GITHUB_TOKEN_PARAM = os.environ.get("GITHUB_TOKEN_PARAM", "/xyz-pilot/github/service-token")
 secretsmanager = boto3.client("secretsmanager", region_name=REGION)
 ssm = boto3.client("ssm", region_name=REGION)
 _GITHUB_TOKEN_CACHE: str | None = None

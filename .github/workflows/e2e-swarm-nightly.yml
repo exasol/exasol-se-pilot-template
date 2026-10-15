@@ -187,7 +187,7 @@ jobs:
             git_pat="$(
               aws ssm get-parameter \
                 --region "${AWS_REGION}" \
-                --name /xyz-pilot/chatbot/github-token \
+                --name /xyz-pilot/github/service-token \
                 --with-decryption \
                 --query Parameter.Value \
                 --output text \

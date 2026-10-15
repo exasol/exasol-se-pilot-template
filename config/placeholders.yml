@@ -10,6 +10,7 @@ placeholders:
   COGNITO_DOMAIN_PREFIX: "Cognito Hosted-UI domain prefix; defaults to the project slug"
   LAMBDA_URL_ID: "Lambda Function URL id; runtime value, emitted by the deploy"
   COGNITO_USER_POOL_ID: "Cognito user pool ID; runtime value, supplied via environment at deploy time"
+  SEMANTIC_LAYER_VENDOR: "Optional semantic-layer vendor; kept as an unrendered hint because a semantic layer is an industry-standard architecture recommendation"
   SEMANTIC_LAYER_SCHEMA: "Optional third-party semantic-layer schema name"
   OPERATOR_USER: "Operator username; derived from OPERATOR_EMAIL local part"
   AWS_PROFILE: "Local AWS CLI profile"

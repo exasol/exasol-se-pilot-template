@@ -1,0 +1,27 @@
+Proprietary and Confidential License
+Copyright (c) Exasol AG. All rights reserved.
+
+This repository and its contents are proprietary and confidential.
+Access is restricted to authorized participants of the <PROJECT_ID_UPPER> Pilot and
+approved evaluators under written approval.
+
+You may not, without prior written permission from Exasol AG:
+1. copy, redistribute, publish, sublicense, sell, or otherwise transfer
+   this repository or substantial parts of it;
+2. use this material to build competing offerings;
+3. remove or alter ownership, confidentiality, or attribution notices.
+
+Ownership carve-out:
+- Exasol pilot platform IP (core code, runbooks, automation, migration
+  framework) is owned by Exasol AG.
+- Optional semantic-layer components and modeling artifacts, where a pilot
+  adopts one, are owned/licensed by <SEMANTIC_LAYER_VENDOR> under separate
+  terms.
+- Customer-originated materials under `clients/XYZ/` remain the property
+  of the <PROJECT_ID_UPPER> pilot customer and are treated as customer-confidential.
+
+No open-source license is granted by this file.
+Use is evaluation/internal only unless separately agreed in writing.
+
+Legal review note: this operational license notice is a project guardrail.
+Binding contractual terms remain governed by executed agreements.

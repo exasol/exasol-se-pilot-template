@@ -65,7 +65,7 @@ GITHUB_REPO        = os.environ.get(
     "GITHUB_REPO", "<GITHUB_OWNER>/<PROJECT_SLUG>",
 )
 SSM_PAT_NAME       = os.environ.get(
-    "SSM_PAT_NAME", "/xyz-pilot/chatbot/github-token",
+    "SSM_PAT_NAME", "/xyz-pilot/github/service-token",
 )
 HISTORY_DIR        = os.environ.get("HISTORY_DIR", "/data/history")
 HISTORY_MAX_ITEMS  = 10
@@ -360,7 +360,7 @@ You are XYZ-PILOT-043 Phase 1 (shipped 2026-05-20) + XYZ-PILOT-049 Phase 2 + XYZ
   - **Phase 3 tools (XYZ-PILOT-053):** live Exasol DB access via two complementary surfaces:
     1. Internal Exasol MCP sidecar (`http://mcp-internal:8000/mcp` on the docker bridge network, no auth — trust boundary is the docker network). Provides ~20 **metadata** tools — `list_exasol_schemas`, `list_exasol_tables_and_views`, `describe_exasol_table_or_view`, `find_exasol_tables_and_views`, `list_exasol_custom_functions`, `list_exasol_built_in_functions` (and search/describe variants). Discovered at runtime via MCP `list_tools` and exposed to Bedrock dynamically. This image (exasol-mcp v3.2.4) intentionally has no SQL-execution tool.
     2. Chatbot-side `exasol_query(sql)` tool — pyexasol against the same DB, same `XYZ_DASH` read-only credential. SELECT / WITH / DESCRIBE / EXPLAIN / SHOW only. Results capped at 200 rows / 12 K chars. Use this for actual data; use the MCP metadata tools for structure.
-  - GitHub repo write access: "Archive this Q&A to repo" creates or updates docs/70-generated-qa/qa/YYYY-MM-DD_<slug>.md on main. Defects + enhancement requests have TWO candidate-emission entry points for XYZ_MASTER consolidation: (1) post-reply buttons "File as feature request" / "Log as new defect" that operate on the last Q&A, and (2) a direct-submit form below the chat input (🐛 Submit as Defect / ✨ Submit as Enhancement — XYZ-PILOT-084) that skips the Q&A round-trip. Both paths read docs/XYZ_PILOT_ISSUE_TRACKER.md for the same Bedrock-driven duplicate check against the tracker's Open + recent Resolved entries first, then emit tests/logs/runs/<UTC>/XYZ_PILOT_CHATBOT/issue-candidates.md rows; existing tickets are surfaced instead of creating duplicates. Uses the same PAT fetched at runtime from SSM Parameter Store /xyz-pilot/chatbot/github-token.
+  - GitHub repo write access: "Archive this Q&A to repo" creates or updates docs/70-generated-qa/qa/YYYY-MM-DD_<slug>.md on main. Defects + enhancement requests have TWO candidate-emission entry points for XYZ_MASTER consolidation: (1) post-reply buttons "File as feature request" / "Log as new defect" that operate on the last Q&A, and (2) a direct-submit form below the chat input (🐛 Submit as Defect / ✨ Submit as Enhancement — XYZ-PILOT-084) that skips the Q&A round-trip. Both paths read docs/XYZ_PILOT_ISSUE_TRACKER.md for the same Bedrock-driven duplicate check against the tracker's Open + recent Resolved entries first, then emit tests/logs/runs/<UTC>/XYZ_PILOT_CHATBOT/issue-candidates.md rows; existing tickets are surfaced instead of creating duplicates. Uses the same PAT fetched at runtime from SSM Parameter Store /xyz-pilot/github/service-token.
   - Cost: ~$1–3/month incremental, Bedrock-token-driven. Tool-heavy turns are slightly more expensive (~+5–10 ¢ extra round-trip).
 Source code in services/chatbot/ on the repo. When asked about your architecture, describe it freely using the facts above — they are deployed reality, not speculation.
 

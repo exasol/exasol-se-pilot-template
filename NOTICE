@@ -1,0 +1,33 @@
+<PROJECT_ID_UPPER> Pilot Ownership and Confidentiality Notice
+
+This repository contains a material set from up to three parties:
+
+1) Exasol AG
+   - Pilot platform assets: automation, dashboard code, chatbot runtime,
+     scheduler/lambda operations, runbooks, migration framework, and
+     non-semantic-layer SQL/analytics implementation.
+   - Default ownership for repository assets unless stated otherwise below.
+
+2) <SEMANTIC_LAYER_VENDOR> (optional)
+   - A semantic layer between Exasol and the BI client is an industry-standard
+     architecture recommendation. Where a pilot adopts a licensed third-party
+     semantic layer, its materials live in the project's semantic-layer
+     extract folder (see CLAUDE.md Rule #13).
+   - These remain separately licensed vendor assets. Exasol ownership claims
+     do not apply to vendor-origin material.
+
+3) <PROJECT_ID_UPPER> pilot customer
+   - Customer-origin source materials under:
+     - `clients/XYZ/`
+   - Includes customer reports/workbooks/models and customer-context data
+     artifacts. These remain customer property and confidential.
+
+Operational rule:
+- Treat repository access as confidential evaluation access.
+- Do not redistribute outside approved pilot participants.
+- Respect directory-level ownership carve-outs.
+
+See also:
+- `LICENSE`
+- `COPYRIGHT.md`
+- `ACCESS.md`

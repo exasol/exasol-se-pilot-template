@@ -14,7 +14,7 @@ root="${1:-.}"
 identity_regex='[H]arvey|[h]arveyperformance|Performance Company|\b[H]PC\b|\b[h]pc\b|exasol-sol-eng|exasol-workshop-starter|ssas-exasol-migration|[r]ealtdegen|thomas\.degen|/Users/thomas'
 
 # Third-party BI product IP (the source pilot's migration scenario, not this stack).
-thirdparty_regex='\b[S]SAS\b|[P]ower ?BI|[p]owerbi|[P]owerBI|\b[P]BIX\b|\b[P]BIP\b|\.pbix|\.pbip|\b[D]AX\b|[O]LEDBProvider|[M]ultidimensional|powerbi_rebuild|sample_sales_cube|sample_bim_conversion_assets'
+thirdparty_regex='[e]viit|\b[S]SAS\b|[P]ower ?BI|[p]owerbi|[P]owerBI|\b[P]BIX\b|\b[P]BIP\b|\.pbix|\.pbip|\b[D]AX\b|[O]LEDBProvider|[M]ultidimensional|powerbi_rebuild|sample_sales_cube|sample_bim_conversion_assets'
 
 # Domain-specific schema objects — must be neutral placeholders instead.
 schema_regex='[S]ALES_CUBE|[I]NVOICED_SALES|[P]RODUCTGROUP|[S]ALES_TARGET|[S]ALES_REGION|[D]ISTACCTKEY|V_MONTHLY_SALES|V_YOY_SALES|V_SALES_VS_TARGET|V_INVENTORY_ANALYTICS'

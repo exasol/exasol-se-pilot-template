@@ -9,7 +9,7 @@
 #   ./scripts/upload_chatbot_pat.sh
 #
 # Prompts (silently) for the github_pat_… token, uploads to
-#   /<PROJECT_SLUG>/chatbot/github-token  (SecureString, KMS-encrypted)
+#   /<PROJECT_SLUG>/github/service-token  (SecureString, KMS-encrypted)
 # in eu-central-1. The PAT is in this shell process only; cleared on exit.
 #
 # Required AWS credentials: an IAM principal with
@@ -19,7 +19,7 @@
 
 set -euo pipefail
 
-PARAM_NAME="/<PROJECT_SLUG>/chatbot/github-token"
+PARAM_NAME="/<PROJECT_SLUG>/github/service-token"
 REGION="eu-central-1"
 TAG_ENV_FILE="${xyz_PILOT_TAG_ENV_FILE:-config/project.env}"
 

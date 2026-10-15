@@ -96,6 +96,7 @@ def main() -> int:
     tracker_id_prefix = f"{project_id.upper()}-PILOT"
     runtime_id_prefix = f"{project_id}-pilot"
     replacements = [
+        ("clients/XYZ", f"clients/{project_id.upper()}"),
         ("XYZ_PILOT_ISSUE_TRACKER.md", tracker_file),
         ("XYZ_PILOT_ISSUE_TRACKER", tracker_stem),
         ("XYZ-PILOT", tracker_id_prefix),
@@ -175,6 +176,12 @@ def main() -> int:
             if target.exists():
                 raise FileExistsError(f"Cannot rename {path} to existing {target}")
             os.replace(path, target)
+
+    # Bare "XYZ" is not a general placeholder, so the customer-material folder
+    # needs its own rename.
+    clients_dir = root / "clients" / "XYZ"
+    if clients_dir.is_dir():
+        os.replace(clients_dir, clients_dir.with_name(project_id.upper()))
 
     return 0
 

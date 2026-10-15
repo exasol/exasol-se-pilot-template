@@ -44,7 +44,7 @@
       "Effect": "Allow",
       "Action": "ssm:GetParameter",
       "Resource": [
-        "<AWS_ARN><AWS_REGION>:<SOURCE_AWS_ACCOUNT_ID>:parameter/xyz-pilot/chatbot/github-token",
+        "<AWS_ARN><AWS_REGION>:<SOURCE_AWS_ACCOUNT_ID>:parameter/xyz-pilot/github/service-token",
         "<AWS_ARN><AWS_REGION>:<SOURCE_AWS_ACCOUNT_ID>:parameter/xyz-pilot/secrets/exasol-xyz-dash"
       ]
     },

@@ -67,7 +67,7 @@ NOTIFY_EXCLUDE_GROUPS = ("XYZ_BIZ",)
 #   Pull requests: Read
 # Classic PAT equivalent: repo + workflow.
 GITHUB_TOKEN_SECRET_ID = os.environ.get("GITHUB_TOKEN_SECRET_ID", "xyz-pilot/github/service-token")
-GITHUB_TOKEN_PARAM = os.environ.get("GITHUB_TOKEN_PARAM", "/xyz-pilot/chatbot/github-token")
+GITHUB_TOKEN_PARAM = os.environ.get("GITHUB_TOKEN_PARAM", "/xyz-pilot/github/service-token")
 TRACKER_PATH    = "docs/XYZ_PILOT_ISSUE_TRACKER.md"
 STATUS_DASHBOARD_URL = os.environ.get(
     "STATUS_DASHBOARD_URL",

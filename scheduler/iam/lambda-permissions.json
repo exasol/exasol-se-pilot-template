@@ -9,7 +9,7 @@
     {"Effect":"Allow","Action":["s3:ListBucket"],"Resource":"<AWS_ARN><SOURCE_AWS_ACCOUNT_ID>","Condition":{"StringLike":{"s3:prefix":["candidate-drain/*"]}}},
     {"Effect":"Allow","Action":["s3:GetObject","s3:PutObject","s3:PutObjectAcl"],"Resource":"<AWS_ARN><SOURCE_AWS_ACCOUNT_ID>/*"},
     {"Sid":"ReadGithubTokenSecret","Effect":"Allow","Action":["secretsmanager:GetSecretValue"],"Resource":["<AWS_ARN><AWS_REGION>:<SOURCE_AWS_ACCOUNT_ID>:secret:xyz-pilot/github/service-token-*","<AWS_ARN><AWS_REGION>:<AWS_ACCOUNT_ID>:secret:xyz-pilot/github/service-token-*"]},
-    {"Sid":"ReadGithubTokenParameter","Effect":"Allow","Action":["ssm:GetParameter"],"Resource":["<AWS_ARN><AWS_REGION>:<SOURCE_AWS_ACCOUNT_ID>:parameter/xyz-pilot/chatbot/github-token","<AWS_ARN><AWS_REGION>:<AWS_ACCOUNT_ID>:parameter/xyz-pilot/chatbot/github-token"]},
+    {"Sid":"ReadGithubTokenParameter","Effect":"Allow","Action":["ssm:GetParameter"],"Resource":["<AWS_ARN><AWS_REGION>:<SOURCE_AWS_ACCOUNT_ID>:parameter/xyz-pilot/github/service-token","<AWS_ARN><AWS_REGION>:<AWS_ACCOUNT_ID>:parameter/xyz-pilot/github/service-token"]},
     {"Sid":"DecryptGithubTokenParameter","Effect":"Allow","Action":"kms:Decrypt","Resource":["<AWS_ARN><AWS_REGION>:<SOURCE_AWS_ACCOUNT_ID>:alias/aws/ssm","<AWS_ARN><AWS_REGION>:<AWS_ACCOUNT_ID>:alias/aws/ssm"]},
     {"Effect":"Allow","Action":["logs:CreateLogGroup","logs:CreateLogStream","logs:PutLogEvents"],"Resource":"*"}
   ]

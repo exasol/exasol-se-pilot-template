@@ -354,7 +354,7 @@ DAILY_USER_MONITOR_PATH_PREFIX = os.environ.get(
 GITHUB_REPO = os.environ.get("GITHUB_REPO", "<GITHUB_OWNER>/<PROJECT_SLUG>")
 GITHUB_REF = os.environ.get("GITHUB_REF", "main")
 GITHUB_TOKEN_SECRET_ID = os.environ.get("GITHUB_TOKEN_SECRET_ID", "xyz-pilot/github/service-token")
-GITHUB_TOKEN_PARAM = os.environ.get("GITHUB_TOKEN_PARAM", "/xyz-pilot/chatbot/github-token")
+GITHUB_TOKEN_PARAM = os.environ.get("GITHUB_TOKEN_PARAM", "/xyz-pilot/github/service-token")
 _GITHUB_TOKEN_CACHE: str | None = None
 _GITHUB_TOKEN_WARNED: set[str] = set()
 
