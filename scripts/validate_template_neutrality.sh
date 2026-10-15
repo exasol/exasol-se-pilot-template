@@ -19,11 +19,13 @@ thirdparty_regex='[e]viit|\b[S]SAS\b|[P]ower ?BI|[p]owerbi|[P]owerBI|\b[P]BIX\b|
 # Domain-specific schema objects — must be neutral placeholders instead.
 schema_regex='[S]ALES_CUBE|[I]NVOICED_SALES|[P]RODUCTGROUP|[S]ALES_TARGET|[S]ALES_REGION|[D]ISTACCTKEY|V_MONTHLY_SALES|V_YOY_SALES|V_SALES_VS_TARGET|V_INVENTORY_ANALYTICS'
 
-# Live account-specific resource identifiers and secret-shaped literals.
+# Live account-specific resource identifiers (EBS snapshots/volumes, AMIs,
+# network IDs, EC2 instances, Exasol launcher deployment IDs) and secret-shaped
+# literals. Use the runtime placeholders in config/placeholders.yml instead.
 # The <AWS_REGION>_xxxxxxxxx alternative matters: a partly-anonymized pool ID
 # keeps its (secret) pool suffix while losing the literal region prefix, so it
 # only becomes visible after rendering. Catch it in the template too.
-secret_regex='gho_[A-Za-z0-9_]{20,}|AKIA[A-Z0-9]{16}|BEGIN (RSA|OPENSSH|PRIVATE) KEY|[a-z]{2}-[a-z]+-[0-9]_[A-Za-z0-9]{9}|<AWS_REGION>_[A-Za-z0-9]{9}'
+secret_regex='\b(snap|vol|ami|sg|subnet|vpc|eipalloc|igw|rtb)-[0-9a-f]{8,17}\b|\bi-0[0-9a-f]{16}\b|[e]xasol-[0-9a-f]{8}\b|gho_[A-Za-z0-9_]{20,}|AKIA[A-Z0-9]{16}|BEGIN (RSA|OPENSSH|PRIVATE) KEY|[a-z]{2}-[a-z]+-[0-9]_[A-Za-z0-9]{9}|<AWS_REGION>_[A-Za-z0-9]{9}'
 
 source_specific_regex="$identity_regex|$thirdparty_regex|$schema_regex|$secret_regex"
 

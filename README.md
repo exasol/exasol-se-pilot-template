@@ -121,6 +121,15 @@ Review and fill `config/project.env`, especially:
 - `PILOT_DOMAIN`
 - recipient lists and operator email
 
+Runtime AWS resource identifiers (account IDs, EC2 instance, EBS
+volumes/snapshots, AMI, security group, Exasol launcher deployment ID and
+archive bucket) are deliberately left as unrendered placeholders. They are
+listed under `runtime_placeholders` in
+[`config/placeholders.yml`](config/placeholders.yml), together with the
+migration and recovery scripts that use them. Pass the live values as
+environment overrides when you run those scripts and never commit them; the
+neutrality check rejects raw resource IDs.
+
 Then run:
 
 ```bash

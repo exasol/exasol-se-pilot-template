@@ -16,7 +16,7 @@ mkdir -p artifacts/aws-tag-inventory/source artifacts/aws-tag-inventory/target a
 canonical_name="XYZ_INFRASTRUCTURE"
 requested_alias="XYZ_INRFASTRUCTURE"
 
-source_profile="${XYZ_INFRA_SOURCE_PROFILE:-${XYZ_INFRA_LEGACY_PROFILE:-<OPS_USER_1>Degen}}"
+source_profile="${XYZ_INFRA_SOURCE_PROFILE:-${XYZ_INFRA_LEGACY_PROFILE:-<SOURCE_AWS_PROFILE>}}"
 source_account="${XYZ_INFRA_SOURCE_ACCOUNT:-<SOURCE_AWS_ACCOUNT_ID>}"
 source_region="${XYZ_INFRA_SOURCE_REGION:-<AWS_REGION>}"
 source_az="${XYZ_INFRA_SOURCE_AZ:-<AWS_REGION>c}"
@@ -421,7 +421,7 @@ ec2_instance_check "target" "$target_profile" "$target_region" "$target_instance
 if [ "$source_live_checks" = "1" ]; then
   tag_inventory_probe "source" "$source_profile" "$source_region" "$source_tag_out"
 else
-  xyz_result "source AWS tag inventory" "scripts/aws_tag_inventory.sh succeeds" "skipped in target-only OIDC run" "PASS" "Run locally with <OPS_USER_1>Degen profile for legacy source inventory"
+  xyz_result "source AWS tag inventory" "scripts/aws_tag_inventory.sh succeeds" "skipped in target-only OIDC run" "PASS" "Run locally with <SOURCE_AWS_PROFILE> profile for legacy source inventory"
 fi
 tag_inventory_probe "target" "$target_profile" "$target_region" "$target_tag_out"
 

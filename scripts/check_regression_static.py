@@ -257,7 +257,7 @@ def check_chatbot_tool_loop_contract(errors: list[str]) -> None:
 
 
 def check_chatbot_target_runtime_baseline(errors: list[str]) -> None:
-    """Chatbot target runtime references must match 029/<AWS_REGION> after migration."""
+    """Chatbot target runtime references must match the target account/<AWS_REGION> after migration."""
     app_path = Path("services/chatbot/app.py")
     app_text = app_path.read_text(encoding="utf-8")
     required_app = {
@@ -293,7 +293,7 @@ def check_xyz_infrastructure_current_baseline(errors: list[str]) -> None:
     agent_path = Path("tests/agents/XYZ_INFRASTRUCTURE/run.sh")
     agent_text = agent_path.read_text(encoding="utf-8")
     required_agent = {
-        "legacy source profile": "source_profile=\"${XYZ_INFRA_SOURCE_PROFILE:-${XYZ_INFRA_LEGACY_PROFILE:-<OPS_USER_1>Degen}}\"" in agent_text,
+        "legacy source profile": "source_profile=\"${XYZ_INFRA_SOURCE_PROFILE:-${XYZ_INFRA_LEGACY_PROFILE:-<SOURCE_AWS_PROFILE>}}\"" in agent_text,
         "legacy source AZ": "source_az=\"${XYZ_INFRA_SOURCE_AZ:-<AWS_REGION>c}\"" in agent_text,
         "legacy source instance": "source_instance=\"${XYZ_INFRA_SOURCE_EC2_INSTANCE_ID:-<EC2_INSTANCE_ID>}\"" in agent_text,
         "target default profile": "target_profile=\"${XYZ_INFRA_TARGET_PROFILE:-default}\"" in agent_text,

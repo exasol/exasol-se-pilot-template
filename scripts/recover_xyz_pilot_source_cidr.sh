@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# <PILOT_NAME> — state-preserving RECOVERY into the SOURCE CIDR (us-east-1).
+# <PILOT_NAME> — state-preserving RECOVERY into the SOURCE CIDR (target region).
 #
 # WHY THIS EXISTS (protocol Issues 4+5, 2026-06-11):
 #   The first migration attempt changed the VPC CIDR to 10.40.0.0/16, which forced
@@ -20,21 +20,21 @@
 #   CIDRs across isolated, UN-PEERED VPCs are safe. NEVER attempt a post-launch
 #   private-IP change via `c4 host play`.
 #
-# This script is TARGET-ONLY (account 029, us-east-1) and reuses already-existing
-# cross-region snapshots + AMI + SSM profile + key — it never touches the source (776).
+# This script is TARGET-ONLY (target account and region) and reuses already-existing
+# cross-region snapshots + AMI + SSM profile + key — it never touches the source account.
 set -euo pipefail
 
-REGION="${REGION:-us-east-1}"
-AZ="${AZ:-us-east-1a}"
+REGION="${REGION:-<AWS_REGION>}"
+AZ="${AZ:-<AWS_AZ>}"
 VPC_CIDR="${VPC_CIDR:-172.30.0.0/16}"        # MATCHES SOURCE — do not change
 SUBNET_CIDR="${SUBNET_CIDR:-172.30.1.0/24}"  # MATCHES SOURCE
 PRIVATE_IP="${PRIVATE_IP:-172.30.1.11}"      # MATCHES SOURCE — the whole point
-DEPLOYMENT_ID="${DEPLOYMENT_ID:-exasol-e411ca48}"
+DEPLOYMENT_ID="${DEPLOYMENT_ID:-<EXASOL_DEPLOYMENT_ID>}"
 AMI_ID="${AMI_ID:-<AMI_ID>}"            # original migrated root (privateIp=172.30.1.11, install.complete)
-DATA_SNAPSHOT_ID="${DATA_SNAPSHOT_ID:-snap-0ae13a056f19fc8f3}"  # pre-wipe data copy in us-east-1
+DATA_SNAPSHOT_ID="${DATA_SNAPSHOT_ID:-<EBS_SNAPSHOT_ID>}"  # pre-wipe data copy in the target region
 INSTANCE_TYPE="${INSTANCE_TYPE:-r6i.xlarge}"
-KEY_NAME="${KEY_NAME:-<PROJECT_SLUG>-us-east-1-key}"
-INSTANCE_PROFILE="${INSTANCE_PROFILE:-exasol-e411ca48-ssm-instance-profile}"
+KEY_NAME="${KEY_NAME:-<PROJECT_SLUG>-<AWS_REGION>-key}"
+INSTANCE_PROFILE="${INSTANCE_PROFILE:-<EXASOL_DEPLOYMENT_ID>-ssm-instance-profile}"
 STATE="${STATE:-/tmp/xyz-recovery-state.env}"
 export AWS_PROFILE="${AWS_PROFILE:-default}"          # target account profile
 

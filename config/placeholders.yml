@@ -26,3 +26,27 @@ placeholders:
   COST_CENTER: "Exasol IT exa:CostCenter tag value"
   DATA_CLASSIFICATION: "Exasol IT exa:DataClassification tag value"
   DEFAULT_AWS_WORKLOAD: "Default Exasol IT exa:Workload tag value for application resources"
+
+# Runtime AWS resource identifiers. The generator does NOT render these: they
+# only exist after deployment (or belong to a source environment during a
+# migration). Set them as environment overrides when running the scripts
+# below; never commit live values. validate_template_neutrality.sh blocks raw
+# snapshot/volume/AMI/network/instance IDs and Exasol launcher deployment IDs.
+# Used by: scripts/recover_xyz_pilot_source_cidr.sh,
+#          scripts/exasol_backup_restore_migration.sh,
+#          scripts/migrate_xyz_pilot_state_preserving.sh,
+#          scripts/xyz_pilot_phase02b_rehost_app_stack.sh
+runtime_placeholders:
+  AWS_ACCOUNT_ID: "Target AWS account ID of the pilot"
+  AWS_ARN: "ARN prefix (arn:aws:<service>:) used in IAM policy resources"
+  SOURCE_AWS_ACCOUNT_ID: "Source AWS account ID during an account/region migration"
+  SOURCE_AWS_PROFILE: "Local AWS CLI profile bound to the source account"
+  SOURCE_AWS_REGION: "Source AWS region during a migration"
+  EC2_INSTANCE_ID: "Exasol Personal EC2 instance ID"
+  EXASOL_HOSTNAME: "Public DNS name of the Exasol Personal instance"
+  EXASOL_DEPLOYMENT_ID: "Exasol launcher deployment ID (exasol-<8 hex>); also prefixes its key pair, security group and SSM instance profile"
+  EXASOL_ARCHIVE_BUCKET: "S3 archive bucket created by the Exasol launcher for DB backups"
+  AMI_ID: "AMI of the migrated Exasol root volume"
+  EBS_VOLUME_ID: "EBS volume ID (root or data volume)"
+  EBS_SNAPSHOT_ID: "EBS snapshot ID of the data volume used for recovery"
+  SECURITY_GROUP_ID: "Security group ID of the Exasol deployment"

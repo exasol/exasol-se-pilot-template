@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Minimal Phase 06 — scheduled graceful start/stop for the <AWS_REGION> target (029).
+# Minimal Phase 06 — scheduled graceful start/stop for the <AWS_REGION> target account.
 #
 # Creates (idempotent): an IAM execution role (least-priv: ec2 start/stop on the
 # one instance + describe + logs), one `xyz-pilot-scheduler` Lambda, and two

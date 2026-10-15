@@ -1,4 +1,4 @@
-"""<PILOT_NAME> — start/stop scheduler Lambda (029/<AWS_REGION>) with rich OPS-ONLY status email.
+"""<PILOT_NAME> — start/stop scheduler Lambda (target account/<AWS_REGION>) with rich OPS-ONLY status email.
 
 Issues the EC2 lifecycle call and (for STOP, or an explicit notify) emails the OPS-ONLY
 recipients the full status-notification (matching the established source format,
@@ -18,8 +18,8 @@ STATUS_BUCKET = "xyz-pilot-status-<AWS_ACCOUNT_ID>"
 COGNITO_DOMAIN = "https://<COGNITO_DOMAIN_PREFIX>.auth.<AWS_REGION>.amazoncognito.com"
 DASHBOARD = os.environ.get("STATUS_DASHBOARD_URL", "https://<PROJECT_SLUG>-dashboard.<PILOT_DOMAIN>")
 # Point the "Status dashboard (live)" link directly at the dashboard.html REST URL
-# (029) — bypasses the index.html meta-refresh redirect entirely, so the email flow
-# never routes through a redirect page that a browser could have cached pointing at 776.
+# (target account) — bypasses the index.html meta-refresh redirect entirely, so the email flow
+# never routes through a redirect page that a browser could have cached pointing at the source account.
 STATUS_WEBSITE = DASHBOARD
 
 

@@ -4,7 +4,7 @@
 # WHY THIS (protocol Issues 1-8): the state-preserving EBS approach hit 8 walls
 # across the cross-region boundary (IP binding -> volume lock -> c4-host-play wipe
 # -> lazy-load STE_READ -> readHeader/metadata mismatch). Backup/restore
-# re-materializes the data on FRESH storage in us-east-1, so none of those recur.
+# re-materializes the data on FRESH storage in the target region, so none of those recur.
 #
 # DESIGN: runs UNATTENDED (nohup) so it does NOT consume an interactive Claude
 # Code session. Idempotent + resumable via a state file. All Exasol work is driven
@@ -19,17 +19,17 @@
 #   Real run:   nohup bash scripts/exasol_backup_restore_migration.sh > /tmp/exa-bkp-restore.log 2>&1 &
 set -euo pipefail
 
-# ---- Source (776 / eu-central-1) ----
+# ---- Source account / region ----
 SOURCE_PROFILE="${SOURCE_PROFILE:-<AWS_PROFILE>}"
-SOURCE_REGION="${SOURCE_REGION:-eu-central-1}"
+SOURCE_REGION="${SOURCE_REGION:-<SOURCE_AWS_REGION>}"
 SOURCE_INSTANCE="${SOURCE_INSTANCE:-<EC2_INSTANCE_ID>}"
-SOURCE_S3_BUCKET="${SOURCE_S3_BUCKET:-exasol-e411ca48-s3-archive-15a59198-fa7c-7b8c-7910-880ee7cb0a1c}"  # pre-provisioned (archive.enabled was false)
+SOURCE_S3_BUCKET="${SOURCE_S3_BUCKET:-<EXASOL_ARCHIVE_BUCKET>}"  # pre-provisioned (archive.enabled was false)
 
-# ---- Target (029 / us-east-1) ----
+# ---- Target account / region ----
 TARGET_PROFILE="${TARGET_PROFILE:-default}"
-TARGET_REGION="${TARGET_REGION:-us-east-1}"
-TARGET_INSTANCE="${TARGET_INSTANCE:-}"          # [CONFIRM] a CLEAN Exasol Personal in us-east-1 (fresh `exasol deploy`); set its instance id here
-TARGET_S3_BUCKET="${TARGET_S3_BUCKET:-}"        # [CONFIRM] a 029-readable bucket for the backup (or make SOURCE_S3_BUCKET cross-account readable)
+TARGET_REGION="${TARGET_REGION:-<AWS_REGION>}"
+TARGET_INSTANCE="${TARGET_INSTANCE:-}"          # [CONFIRM] a CLEAN Exasol Personal in the target region (fresh `exasol deploy`); set its instance id here
+TARGET_S3_BUCKET="${TARGET_S3_BUCKET:-}"        # [CONFIRM] a target-account-readable bucket for the backup (or make SOURCE_S3_BUCKET cross-account readable)
 
 # ---- DB / backup ----
 DB_NAME="${DB_NAME:-Exasol}"
@@ -119,14 +119,14 @@ phase_backup() {
 
 phase_cross_account_s3() {
   [ "${P_S3SYNC:-}" = done ] && { log "S3 cross-account done (state)"; return; }
-  [ -z "$TARGET_S3_BUCKET" ] && confirm APPROVE_S3 "set TARGET_S3_BUCKET (029-readable) OR make SOURCE_S3_BUCKET cross-account readable, then APPROVE_S3=1"
-  log "syncing backup 776 -> 029 bucket $TARGET_S3_BUCKET"
+  [ -z "$TARGET_S3_BUCKET" ] && confirm APPROVE_S3 "set TARGET_S3_BUCKET (target-account-readable) OR make SOURCE_S3_BUCKET cross-account readable, then APPROVE_S3=1"
+  log "syncing backup source -> target bucket $TARGET_S3_BUCKET"
   AWS_PROFILE="$SOURCE_PROFILE" aws s3 sync "s3://$SOURCE_S3_BUCKET" "s3://$TARGET_S3_BUCKET" --source-region "$SOURCE_REGION" --region "$TARGET_REGION" || die "s3 sync failed (check cross-account perms)"
   save P_S3SYNC done
 }
 
 phase_restore() {
-  confirm APPROVE_RESTORE "DESTRUCTIVE restore into TARGET_INSTANCE=$TARGET_INSTANCE (must be a CLEAN Exasol Personal in us-east-1). Set APPROVE_RESTORE=1"
+  confirm APPROVE_RESTORE "DESTRUCTIVE restore into TARGET_INSTANCE=$TARGET_INSTANCE (must be a CLEAN Exasol Personal in the target region). Set APPROVE_RESTORE=1"
   [ -z "$TARGET_INSTANCE" ] && die "TARGET_INSTANCE not set (deploy a clean Exasol Personal first)"
   wait_db_up "$TARGET_PROFILE" "$TARGET_REGION" "$TARGET_INSTANCE"
   log "creating archive volume on target -> $TARGET_S3_BUCKET"

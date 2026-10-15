@@ -458,7 +458,7 @@ j) **Final report back (≤ 200 words):**
 
 ## Critical constraints
 
-- Use `AWS_PROFILE=exasol` (or `AWS_PROFILE=default` — both bind to account `<SOURCE_AWS_ACCOUNT_ID>`) for any `aws` invocation against XYZ Pilot resources (none expected for tracker filing). `AWS_PROFILE=ThomasDegen` is obsolete — the legacy source account `<AWS_ACCOUNT_ID>` was decommissioned 2026-06-30 and points at an empty account.
+- Use `AWS_PROFILE=exasol` (or `AWS_PROFILE=default` — both bind to account `<SOURCE_AWS_ACCOUNT_ID>`) for any `aws` invocation against XYZ Pilot resources (none expected for tracker filing). `AWS_PROFILE=<SOURCE_AWS_PROFILE>` is obsolete — the legacy source account `<AWS_ACCOUNT_ID>` was decommissioned 2026-06-30 and points at an empty account.
 - Never print any secret.
 - Touch ONLY `docs/XYZ_PILOT_ISSUE_TRACKER.md`, the new archive file, and the candidate outcome marker. Nothing else.
 - Forbidden: `--no-verify`, `--amend`, `--force`, `-i`, `git add .`, `git add -A`, `git commit -a`.

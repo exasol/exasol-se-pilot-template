@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# State-preserving cross-account migration for the Exasol E2E Workshop.
+# State-preserving cross-account migration for <PILOT_NAME>.
 #
 # This creates a target-account copy of the stopped source EC2 root and data
 # volumes, then recreates the minimal EC2/network scaffolding around those
@@ -14,7 +14,7 @@ set -euo pipefail
 # STATUS (2026-06-11): VALIDATED, run-ready for Phase 1-2 — NOT yet executed for real.
 # Resumable + idempotent (records state.env, skips done steps), safe to run detached.
 # Source is never modified by this script.
-#   [done] SOURCE_SECURITY_GROUP_ID confirmed = <SECURITY_GROUP_ID> (exasol-e411ca48-sg).
+#   [done] SOURCE_SECURITY_GROUP_ID confirmed = <SECURITY_GROUP_ID> (<EXASOL_DEPLOYMENT_ID>-sg).
 #   [done] Elastic-IP allocation wired (allocate_target_eip; ALLOCATE_EIP=1).
 #   [done] Step-0 DRY_RUN preflight passed CLEAN (0 failures) 2026-06-11.
 #   [Phase 9] Per-resource exa:DataClassification (XYZ-PILOT-247: personal-edition/networking/
@@ -26,24 +26,24 @@ set -euo pipefail
 #   DRY_RUN=1 bash scripts/migrate_xyz_pilot_state_preserving.sh
 # Real run (after operator go; detachable so a session/limit halt can't break it):
 #   nohup bash scripts/migrate_xyz_pilot_state_preserving.sh > /tmp/xyz-pilot-migration.log 2>&1 &
-SOURCE_PROFILE="${SOURCE_PROFILE:-<OPS_USER_1>Degen}"      # -> source account <SOURCE_AWS_ACCOUNT_ID>
+SOURCE_PROFILE="${SOURCE_PROFILE:-<SOURCE_AWS_PROFILE>}"      # -> source account <SOURCE_AWS_ACCOUNT_ID>
 TARGET_PROFILE="${TARGET_PROFILE:-default}"          # -> target account <AWS_ACCOUNT_ID>
 SOURCE_REGION="${SOURCE_REGION:-<AWS_REGION>}"
 TARGET_REGION="${TARGET_REGION:-<AWS_REGION>}"
 SOURCE_ACCOUNT="${SOURCE_ACCOUNT:-<SOURCE_AWS_ACCOUNT_ID>}"
 TARGET_ACCOUNT="${TARGET_ACCOUNT:-<AWS_ACCOUNT_ID>}"
-DEPLOYMENT_ID="${DEPLOYMENT_ID:-exasol-e411ca48}"     # source Exasol launcher deployment id (reused for target, per Codex)
+DEPLOYMENT_ID="${DEPLOYMENT_ID:-<EXASOL_DEPLOYMENT_ID>}"     # source Exasol launcher deployment id (reused for target, per Codex)
 SOURCE_INSTANCE_ID="${SOURCE_INSTANCE_ID:-<EC2_INSTANCE_ID>}"
 SOURCE_ROOT_VOLUME_ID="${SOURCE_ROOT_VOLUME_ID:-<EBS_VOLUME_ID>}"   # /dev/sda1, unencrypted
 SOURCE_DATA_VOLUME_ID="${SOURCE_DATA_VOLUME_ID:-<EBS_VOLUME_ID>}"   # /dev/sdf, encrypted, holds Exasol DB + external semantic layer
-SOURCE_SECURITY_GROUP_ID="${SOURCE_SECURITY_GROUP_ID:-<SECURITY_GROUP_ID>}"  # exasol-e411ca48-sg (confirmed step a)
+SOURCE_SECURITY_GROUP_ID="${SOURCE_SECURITY_GROUP_ID:-<SECURITY_GROUP_ID>}"  # <EXASOL_DEPLOYMENT_ID>-sg (confirmed step a)
 TARGET_AZ="${TARGET_AZ:-<AWS_REGION>a}"
 INSTANCE_TYPE="${INSTANCE_TYPE:-r6i.xlarge}"
-VPC_CIDR="${VPC_CIDR:-10.40.0.0/16}"                  # collision-checked clean in 029/<AWS_REGION>
+VPC_CIDR="${VPC_CIDR:-10.40.0.0/16}"                  # collision-checked clean in target <AWS_REGION>
 SUBNET_CIDR="${SUBNET_CIDR:-10.40.1.0/24}"
 PRIVATE_IP="${PRIVATE_IP:-10.40.1.11}"
 KEY_NAME="${KEY_NAME:-xyz-pilot-${TARGET_REGION}-key}"          # target key-pair name (import as)
-SOURCE_KEY_NAME="${SOURCE_KEY_NAME:-exasol-e411ca48-key}"      # source key-pair to export public material from
+SOURCE_KEY_NAME="${SOURCE_KEY_NAME:-<EXASOL_DEPLOYMENT_ID>-key}"      # source key-pair to export public material from
 ALLOCATE_EIP="${ALLOCATE_EIP:-1}"                     # allocate a fresh Elastic IP in TARGET_REGION (decision #3)
 DRY_RUN="${DRY_RUN:-0}"                                # 1 = Step-0 preflight only: validate, create/delete NOTHING
 EXA_ENVIRONMENT="${EXA_ENVIRONMENT:-staging}"          # exa:Environment tag value; same-region DEV move overrides to 'development'
@@ -111,7 +111,7 @@ ec2_tags() {
     "Key=CreatedAt,Value=${MIGRATION_RUN}" \
     "Key=MigrationRun,Value=${MIGRATION_RUN}" \
     "Key=MigratedFromAccount,Value=${SOURCE_ACCOUNT}" \
-    "Key=Owner,Value=<AWS_ARN>${TARGET_ACCOUNT}:user/<OPS_USER_1>Degen" \
+    "Key=Owner,Value=<AWS_ARN>${TARGET_ACCOUNT}:user/<OPERATOR_USER>" \
     "Key=exa:Department,Value=SE" \
     "Key=exa:Environment,Value=${EXA_ENVIRONMENT}" \
     "Key=exa:CostCenter,Value=20060" \
