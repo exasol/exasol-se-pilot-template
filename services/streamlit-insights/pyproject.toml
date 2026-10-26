@@ -5,7 +5,7 @@ description = "<CUSTOMER_NAME> QBR dashboard substitute on Streamlit, backed by 
 requires-python = ">=3.11"
 dependencies = [
     "streamlit>=1.36",
-    "pyexasol==2.3.1",
+    "pyexasol==3.0.1",
     "pandas>=2.2",
     "altair>=5.3",
     "boto3>=1.43.13",
