@@ -217,6 +217,7 @@ mkdir -p "$target_dir"
 
 rsync -a \
   --exclude='.git/' \
+  --exclude='.claude/' \
   --exclude='.DS_Store' \
   --exclude='__pycache__/' \
   --exclude='*.pyc' \
