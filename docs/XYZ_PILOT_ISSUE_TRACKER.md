@@ -18,7 +18,7 @@ requests, operational status items, and documentation discipline.
 
 ---
 
-## Full Register (newest first)
+## Full register (newest first)
 
 <a id="xyz-pilot-001"></a>
 
