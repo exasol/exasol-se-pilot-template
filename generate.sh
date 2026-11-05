@@ -227,7 +227,13 @@ rsync -a \
   --exclude='.env' \
   --exclude='.venv/' \
   --exclude='tests/logs/' \
+  --exclude='config/tracker.seed.md' \
+  --exclude='docs/archive/XYZ_PILOT_ISSUE_TRACKER_*' \
   "$template_root/" "$target_dir/"
+
+# The template's own tracker records template work. A new pilot starts from
+# the clean seed instead, with only XYZ-PILOT-001 and unrendered date tokens.
+cp "$template_root/config/tracker.seed.md" "$target_dir/docs/XYZ_PILOT_ISSUE_TRACKER.md"
 
 python3 "$template_root/scripts/render_template_placeholders.py" \
   --root "$target_dir" \
