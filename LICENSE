@@ -1,27 +1,126 @@
-Proprietary and Confidential License
+License and Intellectual Property Notice
+Source-available. All rights reserved.
+
 Copyright (c) Exasol AG. All rights reserved.
 
-This repository and its contents are proprietary and confidential.
-Access is restricted to authorized participants of the <PROJECT_ID_UPPER> Pilot and
-approved evaluators under written approval.
+-------------------------------------------------------------------------------
+1. Status of this repository
+-------------------------------------------------------------------------------
 
-You may not, without prior written permission from Exasol AG:
-1. copy, redistribute, publish, sublicense, sell, or otherwise transfer
-   this repository or substantial parts of it;
-2. use this material to build competing offerings;
-3. remove or alter ownership, confidentiality, or attribution notices.
+This repository is published publicly on GitHub. Nothing in it is confidential,
+and nothing in it may be treated as a trade secret of Exasol AG. Material that
+must stay confidential does not belong here: it belongs in a private or
+internal repository, and committing it here would publish it.
 
-Ownership carve-out:
-- Exasol pilot platform IP (core code, runbooks, automation, migration
-  framework) is owned by Exasol AG.
-- Optional semantic-layer components and modeling artifacts, where a pilot
-  adopts one, are owned/licensed by <SEMANTIC_LAYER_VENDOR> under separate
-  terms.
-- Customer-originated materials under `clients/XYZ/` remain the property
-  of the <PROJECT_ID_UPPER> pilot customer and are treated as customer-confidential.
+Publication is not a grant of rights. Making source visible and granting
+permission to use it are separate acts, and only the second one is a licence.
+Exasol AG performs the first and withholds the second.
 
-No open-source license is granted by this file.
-Use is evaluation/internal only unless separately agreed in writing.
+-------------------------------------------------------------------------------
+2. No licence is granted
+-------------------------------------------------------------------------------
 
-Legal review note: this operational license notice is a project guardrail.
-Binding contractual terms remain governed by executed agreements.
+No licence, express or implied, is granted to any person under the copyright,
+patent, database or other intellectual property rights of Exasol AG by the
+publication of this repository.
+
+In particular, and except where section 3 or a separate written agreement
+applies, you may not:
+
+1. use this repository or substantial parts of it, in source or compiled form,
+   in your own products, services or internal systems;
+2. copy, redistribute, publish, host, sublicense, sell or otherwise transfer it
+   outside GitHub;
+3. create or distribute derivative works of it;
+4. use this material to build competing offerings;
+5. remove or alter copyright, ownership, licence or attribution notices.
+
+This is not an open-source licence as defined by the Open Source Initiative,
+and it is not intended to become one by implication, by the absence of an
+objection, or by the presence of this repository on a public platform.
+
+-------------------------------------------------------------------------------
+3. What GitHub's Terms of Service permit
+-------------------------------------------------------------------------------
+
+Publishing a public repository on GitHub grants other GitHub users the limited
+rights set out in the GitHub Terms of Service, which at the time of writing
+allow viewing the repository and forking it within GitHub.
+
+That permission is the platform's, not Exasol's, and it is the full extent of
+it. It does not allow use, modification, deployment, redistribution outside
+GitHub, or any commercial exploitation. Where the GitHub Terms of Service and
+this file differ, the Terms of Service prevail only as far as they must, and
+this file governs everything else.
+
+-------------------------------------------------------------------------------
+4. Trademarks and brand assets
+-------------------------------------------------------------------------------
+
+"Exasol", the Exasol wordmark and the Exasol "X" mark are trademarks of
+Exasol AG. No trademark licence is granted by this file or by any permission it
+describes. Trademark rights are unaffected by the publication of this
+repository and survive any permitted use of its contents.
+
+Exasol brand assets - the letterhead, the logo extracts and the brand
+presentation template - are not part of this repository and must not be added
+to it. They are internal Exasol material, distributed only through an internal
+repository. See CLAUDE.md, "Agent Skills", and scripts/install_brand_skill.sh.
+
+-------------------------------------------------------------------------------
+5. Ownership carve-outs
+-------------------------------------------------------------------------------
+
+Ownership in this repository is path-scoped:
+
+- Exasol AG owns the pilot platform material by default: automation, dashboard
+  and chatbot code, scheduler and operations code, runbooks, the migration
+  framework and the non-semantic-layer SQL and analytics implementation.
+
+- Where a pilot adopts a licensed third-party semantic layer, that vendor's
+  materials remain the property of <SEMANTIC_LAYER_VENDOR> under separate terms.
+  Exasol ownership claims do not apply to vendor-origin material.
+
+- Customer-origin material remains the property of the respective customer.
+  In this public template repository, `clients/` contains a placeholder and no
+  customer material. None may be added here.
+
+-------------------------------------------------------------------------------
+6. Repositories generated from this template
+-------------------------------------------------------------------------------
+
+This file is copied into every repository generated from this template. A
+generated pilot repository is a different thing from this one: it is normally
+private, and it does carry customer-origin material under `clients/`.
+
+In a generated repository, sections 1 and 3 do not apply, the confidentiality
+and access terms in ACCESS.md do apply, and customer material is
+customer-confidential as described in NOTICE and COPYRIGHT.md. Sections 2, 4
+and 5 apply unchanged in both cases.
+
+-------------------------------------------------------------------------------
+7. No warranty
+-------------------------------------------------------------------------------
+
+This repository is provided "as is", without warranty of any kind, express or
+implied, including but not limited to the warranties of merchantability,
+fitness for a particular purpose and non-infringement. To the extent permitted
+by applicable law, Exasol AG is not liable for any claim, damages or other
+liability arising from this repository or from its use.
+
+-------------------------------------------------------------------------------
+8. Precedence and legal review
+-------------------------------------------------------------------------------
+
+Where another file in this repository describes the contents of this public
+template repository as confidential, this file governs. Those descriptions are
+written for a generated pilot repository, where they remain correct - see
+section 6.
+
+This notice is an operational guardrail maintained by the pilot team. It is not
+a substitute for legal advice and it has not been drafted by counsel. Binding
+contractual terms remain governed by executed agreements between Exasol AG and
+the respective counterparty. Exasol Legal should review this file before it is
+relied upon in a customer-facing context.
+
+Questions on scope or wording: route through the pilot operator.
