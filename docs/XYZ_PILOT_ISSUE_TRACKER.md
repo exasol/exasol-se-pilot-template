@@ -1,6 +1,6 @@
 # Pilot Issue Tracker
 
-**Last refresh:** 2026-11-05 (XYZ-PILOT-002 background XYZ_MASTER tracker mutation service filed Open; verifier clean).
+**Last refresh:** 2026-11-05 (XYZ-PILOT-003 background XYZ_MASTER tracker mutation service filed Resolved 2026-11-05; verifier clean).
 
 This tracker is the single source of truth for project scope, defects, feature
 requests, operational status items, and documentation discipline.
@@ -14,12 +14,45 @@ requests, operational status items, and documentation discipline.
 
 | ID | Severity | Area | Summary |
 |---|---|---|---|
+| ~~[XYZ-PILOT-003](#xyz-pilot-003)~~ | ~~minor~~ | ~~Template · generator~~ | Generated pilots inherit the template's own tracker tickets and tracker snapshots. (Resolved 2026-11-05) |
 | [XYZ-PILOT-002](#xyz-pilot-002) | minor | Template · brand assets | Keep Exasol brand assets out of the public template and generated repos; install the branded-document skill at runtime from an internal repository. |
 | [XYZ-PILOT-001](#xyz-pilot-001) | feature | Template · project bootstrap | Initialize the generated pilot repository and replace placeholders with project-specific configuration. |
 
 ---
 
 ## Full register (newest first)
+
+<a id="xyz-pilot-003"></a>
+
+### XYZ-PILOT-003 - Generated pilots inherit the template's own tracker
+- **Status:** Resolved 2026-11-05
+- **Severity:** minor
+- **Area:** Template · generator
+- **Surfaced:** 2026-11-05 by Claude Code while filing XYZ-PILOT-002 (PR #13).
+
+#### Problem
+
+`generate.sh` copied `docs/XYZ_PILOT_ISSUE_TRACKER.md` and every `docs/archive/XYZ_PILOT_ISSUE_TRACKER_*` snapshot into each new pilot. Once the template's tracker started recording template work (XYZ-PILOT-002), every generated pilot would have opened with template tickets and lost the `<TRACKER_TODAY_DATE>` token that the filer had replaced with a fixed date.
+
+#### Resolution
+
+- New seed file `config/tracker.seed.md`: the bootstrap tracker with only XYZ-PILOT-001, the unrendered date tokens and the canonical `## Full register (newest first)` heading.
+- `generate.sh` excludes `config/tracker.seed.md` and `docs/archive/XYZ_PILOT_ISSUE_TRACKER_*` from the rsync and copies the seed over the target's `docs/XYZ_PILOT_ISSUE_TRACKER.md` before placeholders are rendered.
+- `README.md` states that the template's tracker records template work and that new pilots start from the seed.
+
+#### Validation
+
+- Fresh `./generate --project-id gcm` into a scratch directory: the generated tracker holds only GCM-PILOT-001, shows the generation date, uses the lowercase Full-register heading; no template tracker snapshots in `docs/archive/`; `verify_tracker_completeness.sh` and `validate_template_neutrality.sh` pass in the generated repository.
+- Template repository: verifier and neutrality check pass.
+
+#### Recurrence guard
+
+The seed file is the only tracker source for generated pilots; template tickets can no longer leak through the generator copy.
+
+#### Dependencies / cross-links
+
+- XYZ-PILOT-002 (first template-work ticket, which surfaced this).
+- PR #13 `feat/brand-skill-bootstrap`.
 
 <a id="xyz-pilot-002"></a>
 
