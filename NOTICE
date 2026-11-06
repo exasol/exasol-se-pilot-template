@@ -1,4 +1,18 @@
-<PROJECT_ID_UPPER> Pilot Ownership and Confidentiality Notice
+<PROJECT_ID_UPPER> Pilot Ownership Notice
+
+Scope
+-----
+
+The ownership carve-outs below apply to this public template repository and to
+every pilot repository generated from it. The confidentiality rules at the end
+apply to a generated pilot repository only.
+
+This template repository is published on GitHub. Nothing in it is confidential,
+and the operational rules about redistribution describe the generated
+repository, not this one. See LICENSE, sections 1 and 6.
+
+Ownership
+---------
 
 This repository contains a material set from up to three parties:
 
@@ -7,6 +21,10 @@ This repository contains a material set from up to three parties:
      scheduler/lambda operations, runbooks, migration framework, and
      non-semantic-layer SQL/analytics implementation.
    - Default ownership for repository assets unless stated otherwise below.
+   - Exasol brand assets - letterhead, logo extracts, brand presentation
+     template - are NOT part of this repository and must not be added to it.
+     They are distributed through an internal repository; see
+     scripts/install_brand_skill.sh.
 
 2) <SEMANTIC_LAYER_VENDOR> (optional)
    - A semantic layer between Exasol and the BI client is an industry-standard
@@ -20,9 +38,16 @@ This repository contains a material set from up to three parties:
    - Customer-origin source materials under:
      - `clients/XYZ/`
    - Includes customer reports/workbooks/models and customer-context data
-     artifacts. These remain customer property and confidential.
+     artifacts. These remain customer property.
+   - In this public template repository the path holds a placeholder only.
 
-Operational rule:
+Ownership is independent of secrecy: it rests on copyright, on the absence of
+any granted licence, and on trademark. Publishing this template changes none of
+it.
+
+Operational rules for a generated pilot repository
+--------------------------------------------------
+
 - Treat repository access as confidential evaluation access.
 - Do not redistribute outside approved pilot participants.
 - Respect directory-level ownership carve-outs.

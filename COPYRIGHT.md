@@ -2,7 +2,20 @@
 
 Copyright (c) Exasol AG. All rights reserved.
 
-This repository is confidential pilot material. Ownership is path-scoped:
+## Where the confidentiality statement applies
+
+The ownership map below holds for this public template repository **and** for
+every pilot repository generated from it. The confidentiality statement does
+not: a generated pilot repository is confidential pilot material, while this
+template repository is published on GitHub and contains nothing confidential.
+
+Ownership does not depend on secrecy. Copyright, the absence of any granted
+licence and trademark are what protect Exasol material here — see `LICENSE`,
+in particular sections 1, 2 and 6.
+
+## Ownership map
+
+Ownership is path-scoped:
 
 - Exasol AG:
   - default ownership for pilot framework/runtime/docs in this repository
@@ -16,6 +29,8 @@ This repository is confidential pilot material. Ownership is path-scoped:
 - <PROJECT_ID_UPPER> pilot customer:
   - `clients/XYZ/`
   - customer-origin reports/models/workbooks and associated source material
+  - in this public template repository that path holds a placeholder only, and
+    no customer material may be added to it
 
-Distribution and use remain evaluation/internal only unless explicitly agreed
-in writing. See `LICENSE`, `NOTICE`, and `ACCESS.md`.
+No right of use is granted by this file or by the publication of this
+repository. See `LICENSE`, `NOTICE`, and `ACCESS.md`.
