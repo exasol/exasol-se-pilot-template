@@ -259,6 +259,29 @@ Relevant skills in `.agents/skills/`:
 - **`github-security-supply-chain`** — CodeQL, Dependabot, secret scanning, push protection, action pinning, and ruleset review
 - **`github-tracker-notification-automation`** — Tracker diff parsing and major-defect heads-up notification design
 
+### Exasol branded documents — installed at runtime, never committed
+
+Exasol house-style PDF/DOCX rendering comes from the `exasol-branded-document`
+skill, which is **not** in `.agents/skills/` and must not be put there. It
+carries the official letterhead, the logo extracts and the brand slide
+template: production originals with no distribution licence, and this
+repository is public.
+
+The skill lives in the internal repository `exasol/exasol-branded-document`,
+readable only by members of the Exasol GitHub organization. Install it into the
+ignored path `.claude/skills/`:
+
+```bash
+./scripts/install_brand_skill.sh          # install or update
+./scripts/install_brand_skill.sh --check  # report state only
+```
+
+If you are not an Exasol member the install fails with a clear message and you
+should continue without it — nothing in this repository depends on the skill,
+only Exasol-branded document rendering does. Never copy `assets/` out of the
+skill into a tracked path; `scripts/check_no_brand_assets.py` fails the repo
+hygiene workflow if you do.
+
 ## Pilot Architecture
 
 **Source → Target:** the customer's existing data warehouse and OLAP/semantic

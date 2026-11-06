@@ -179,6 +179,12 @@ Generated projects use a single-writer tracker model:
 - Use direct-main only for low-risk minor/feature candidates or explicit
   operator-approved status/severity transitions.
 
+This template's own tracker records template work. `./generate` does not copy
+it: a new pilot's tracker starts from
+[`config/tracker.seed.md`](config/tracker.seed.md) with only the bootstrap
+ticket, and the template's tracker snapshots under `docs/archive/` are left
+out.
+
 ## Template Maintenance
 
 Source-project names, customer names, account IDs, URLs, credentials, and
